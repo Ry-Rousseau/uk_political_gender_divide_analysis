@@ -32,7 +32,7 @@ source('scripts/setup.R')
 
 -   did the 2024 vote exhibit the gender gap? (age/vote distribution by party vote 2024)
 -   is the gap wider amongst younger generations vs. other? (gap size by age band)
--   
+-   specific issue gaps?
 
 4)  Modelling stage - how does age, gender, other demographics predict ideology?
 
@@ -43,9 +43,9 @@ source('scripts/setup.R')
 -   Forest plot comparing model coefficients (full sample vs. young people)
 -   Predicted value plot incorporating gender/age from the model
 
-5)  Visualization creation, draw out most relevant insights from the above stages
+6)  Visualization creation, draw out most relevant insights from the above stages
 
-6)  Extended segment analysis
+7)  Extended segment analysis
 
 -   What specific ideological markers are significant for corporate positioning strategy? What specific dimension is driving the growing gender divide for the future?
 -   is this happening mostly in urban areas? can we merge in additional data via use of constituency codes?
@@ -497,12 +497,12 @@ gender_gap_summary <- social_means_survey %>%
 print(gender_gap_summary)
 cat("\nSignificance codes: *** p<0.001, ** p<0.01, * p<0.05, . p<0.1\n")
 ```
-In the above, **a positive gap indicates that males score higher than females on that dimension**. 
+
+In the above, **a positive gap indicates that males score higher than females on that dimension**.
 
 The exists gap amongst younger age groups is statistically significant. It exits for both genders. Young men are more socially conservative than young women. Young men are also more economically right wing than young women. The gap narrows with age.
 
-
-Now we'll drill down into more specific issue areas. These can inform PR, targeting and communication strategy for the FTSE company. 
+Now we'll drill down into more specific issue areas. These can inform PR, targeting and communication strategy for the FTSE company.
 
 ##### Specific issue divergence by gender and age groups
 
@@ -585,11 +585,11 @@ print(individual_gaps_overall)
 cat("\nSignificance codes: *** p<0.001, ** p<0.01, * p<0.05, . p<0.1\n")
 ```
 
-If we examine gender gaps across all ages, some notable trends emerge. 
+If we examine gender gaps across all ages, some notable trends emerge.
 
 Censorship observed as the strongest point of disagreement, with women being 0.127 points higher on the agreement scale on average. Followed by the death penalty, where men are 0.069 points higher on the agreement scale.
 
-Areas of issue agreement skew towards economic issues, such as government redistribution and predatory big business perceptions. Notably, stances on stiffer punishment sentences are fairly similar across genders. 
+Areas of issue agreement skew towards economic issues, such as government redistribution and predatory big business perceptions. Notably, stances on stiffer punishment sentences are fairly similar across genders.
 
 ```{r}
 # Age-Stratified Individual Question Analysis
@@ -714,10 +714,292 @@ print(significant_gaps_summary)
 cat("\nSignificance codes: *** p<0.001, ** p<0.01, * p<0.05, . p<0.1\n")
 ```
 
-After segmenting by age and accounting for statistical significance, young people diverge in terms of specific issues.  
+After segmenting by age and accounting for statistical significance, young people diverge in terms of specific issues.
 
 We also see that the average gap between genders declines with age, with the specific issue gaps shrinking towards middle age, and then increasing in old age.
 
+Add visualizations for specific issue areas down the line. Good to know these differences. 
+
+#### 4) Modelling stage - how does age, gender, other demographics predict ideology?
+
+**Is the gender-age interaction the primary driver of ideological differences, or do other demographics matter more?** Informs whether the CEO should focus messaging strategies on generational gender gaps vs. other demographic segments.
+
+```{r}
+# Create survey design object
+
+# Note that we could add stratification to this stage, such as though religion or age. We don't know the stratification scheme. 
+survey_design_full <- svydesign(
+  ids = ~1,  # No clustering in this dataset, assumes simple random sampling
+  weights = ~wt,
+  data = uk_data
+)
+```
+
+##### M1: Social Conservatism Predictors
+
+What demographic factors best predict social conservatism? Is the gender-age interaction significant even after controlling for education, region, etc.?
+
+```{r}
+# Model social conservatism with full demographic controls
+model_social <- svyglm(
+  social_conservatism ~ gender * age + education + ethnicity + region + 
+                       household + socgrad + marital + religion,
+  design = survey_design_full,
+  family = gaussian()
+)
+
+# Display model summary
+summary(model_social)
+
+# Extract key coefficients for interpretation
+social_coefs <- summary(model_social)$coefficients
+
+# Model fit statistics
+cat("\nModel Fit Statistics:\n")
+cat("Degrees of Freedom:", model_social$df.residual, "\n")
+cat("Deviance:", round(model_social$deviance, 3), "\n")
+
+##  Check further diagnostics if wanted
+#plot(model_social)
+
+##  VIF Multicollinearity
+library(car)
+car::vif(model_social, type = 'terms')  # Check for multicollinearity
+
+# Number of observations
+nobs(model_social)  # Number of observations
+
+```
+
+Above shows similar trends to what we've been seeing and hypothesizing.
+
+The main effect shows males are more conservative (+0.040), but the interactions reveal this gender gap narrows with age. In middle age (45-64), the male effect is actually reduced by about 0.067-0.088, suggesting older women catch up in conservatism.
+
+Education: Lower education strongly predicts higher conservatism (+0.141) - one of the largest effects.
+Religion: No religion has a massive negative effect (-0.157) - the strongest predictor. Hindus are more conservative (+0.054).
+Geography: Scotland (-0.075), London (-0.031), and South regions are less conservative.
+Housing: Social renters more conservative (+0.026), private renters less conservative (-0.037).
+
+Note the reference categories in interpreting the above. 
+
+##### M2: Economic Leftism Predictors
+
+Are the drivers of economic vs social attitudes different? This matters for corporate positioning on economic vs social issues.
+
+```{r}
+# Model economic leftism with same demographic controls
+model_economic <- svyglm(
+  economic_leftism ~ gender * age + education + ethnicity + region + 
+                    household + socgrad + marital + religion,
+  design = survey_design_full,
+  family = gaussian()
+)
+
+# Display model summary
+summary(model_economic)
+
+# Extract key coefficients for interpretation
+economic_coefs <- summary(model_economic)$coefficients
+
+# Model fit statistics
+cat("\nModel Fit Statistics:\n")
+cat("Degrees of Freedom:", model_economic$df.residual, "\n")
+cat("Deviance:", round(model_economic$deviance, 3), "\n")
+
+##  Check further diagnostics if wanted
+#plot(model_economic)
+
+##  VIF Multicollinearity
+library(car)
+car::vif(model_economic, type = 'terms')  # Check for multicollinearity
+
+# Number of observations
+nobs(model_economic)  # Number of observations
+
+```
+
+Again, similar trends as seen from our prior visuals and analysis.
+
+Interpeting the economic leftism model:
+
+Older men become much more economically right-wing than older women.
+
+Social renters most left-wing (+0.12) - much stronger than in social conservatism
+
+Lower social grades more left-wing (DE: +0.10, C2: +0.08)
+
+Education has no effect (unlike strong effect in social conservatism)
+
+North West, Scotland, Wales, Yorkshire more left-wing 
+
+South East less left-wing (-0.03)
+
+No religion associated with more economic leftism (+0.06)
+
+Overall, housing is a more important driver in economic leftism than social conservatism.
+
+Some classic political archetypes evidence in the data.
+
+##### M3: Vote Choice Prediction
+
+Do ideological attitudes predict vote better than demographics alone? This tests whether corporate positioning should focus on values vs identity.
+
+```{r}
+# Conservative vote model
+model_vote_con <- svyglm(
+  I(pv_2024 == "con") ~ gender * age + education + ethnicity + region,
+  design = survey_design_full,
+  family = binomial(link = "logit")
+)
+summary(model_vote_con)
+
+# Labour vote model
+model_vote_lab <- svyglm(
+  I(pv_2024 == "lab") ~ gender * age + education + ethnicity + region,
+  design = survey_design_full,
+  family = binomial(link = "logit")
+)
+summary(model_vote_lab)
+
+# Reform vote model
+model_vote_rfm <- svyglm(
+  I(pv_2024 == "rfm") ~ gender * age + education + ethnicity + region,
+  design = survey_design_full,
+  family = binomial(link = "logit")
+)
+summary(model_vote_rfm)
+
+# Green vote model
+model_vote_grn <- svyglm(
+  I(pv_2024 == "grn") ~ gender * age + education + ethnicity + region,
+  design = survey_design_full,
+  family = binomial(link = "logit")
+)
+summary(model_vote_grn)
+
+# Liberal Democrat vote model
+model_vote_ldm <- svyglm(
+  I(pv_2024 == "ldm") ~ gender * age + education + ethnicity + region,
+  design = survey_design_full,
+  family = binomial(link = "logit")
+)
+summary(model_vote_ldm)
+
+```
+
+#### 5) Segmented Modelling - Young vs Older Age Bands
+
+**Are young people truly different, or just experiencing new intersection age + gender effects? How do our other predictors work differently for this cohort of respondents?**
+
+NOTE: I don't know the methodology for creating the weights, so when we run our stratified models on specific age groups, our weights are no longer appropriate since we're no longer estimating on the full nationall representative sample, just our specific age groups. 
+
+We will proceed with unweighted models with just lm(), and just acknowledge this limitation. Not useful to do the whole stratification again, just for this.
+
+##### Young People Models (18-34)
+
+```{r}
+# Create young people subset
+modeling_data_young <- uk_data %>%
+  filter(age %in% c("18_TO_24", "25_TO_34")) %>%
+  filter(!is.na(social_conservatism) & !is.na(economic_leftism) &
+         !is.na(gender) & !is.na(education) & !is.na(ethnicity) & !is.na(region))
+
+print(paste("Young people sample size:", nrow(modeling_data_young)))
+
+# Social conservatism model - young people only (unweighted)
+model_social_young <- lm(
+  social_conservatism ~ gender + education + ethnicity + region + 
+                       household + socgrad + marital + religion,
+  data = modeling_data_young
+)
+summary(model_social_young)
+
+# Economic leftism model - young people only (unweighted)
+model_economic_young <- lm(
+  economic_leftism ~ gender + education + ethnicity + region + 
+                    household + socgrad + marital + religion,
+  data = modeling_data_young
+)
+summary(model_economic_young)
+```
+
+##### Older People Models (35+)
+
+```{r}
+# Create older people subset
+modeling_data_older <- uk_data %>%
+  filter(age %in% c("35_TO_44", "45_TO_54", "55_TO_64", "65_TO_74","75_PLUS")) %>%
+  filter(!is.na(social_conservatism) & !is.na(economic_leftism) &
+         !is.na(gender) & !is.na(education) & !is.na(ethnicity) & !is.na(region))
+
+print(paste("Older people sample size:", nrow(modeling_data_older)))
+
+# Social conservatism model - older people only (unweighted)
+model_social_older <- lm(
+  social_conservatism ~ gender + education + ethnicity + region + 
+                       household + socgrad + marital + religion,
+  data = modeling_data_older
+)
+summary(model_social_older)
+
+# Economic leftism model - older people only (unweighted)
+model_economic_older <- lm(
+  economic_leftism ~ gender + education + ethnicity + region + 
+                    household + socgrad + marital + religion,
+  data = modeling_data_older
+)
+summary(model_economic_older)
+```
+
+##### Compare Young vs Older Coefficients
+
+```{r}
+# Extract gender coefficients for comparison
+print("=== GENDER EFFECTS COMPARISON: YOUNG VS OLDER ===")
+
+# Social conservatism gender effects
+social_young_gender <- summary(model_social_young)$coefficients["gendermale", c("Estimate", "Pr(>|t|)")]
+social_older_gender <- summary(model_social_older)$coefficients["gendermale", c("Estimate", "Pr(>|t|)")]
+
+cat("Social Conservatism - Male Effect:\n")
+cat("Young (18-34):", round(social_young_gender[1], 3), "p =", round(social_young_gender[2], 3), "\n")
+cat("Older (35+):", round(social_older_gender[1], 3), "p =", round(social_older_gender[2], 3), "\n")
+
+# Economic leftism gender effects  
+economic_young_gender <- summary(model_economic_young)$coefficients["gendermale", c("Estimate", "Pr(>|t|)")]
+economic_older_gender <- summary(model_economic_older)$coefficients["gendermale", c("Estimate", "Pr(>|t|)")]
+
+cat("\nEconomic Leftism - Male Effect:\n")
+cat("Young (18-34):", round(economic_young_gender[1], 3), "p =", round(economic_young_gender[2], 3), "\n")
+cat("Older (35+):", round(economic_older_gender[1], 3), "p =", round(economic_older_gender[2], 3), "\n")
+```
+
+#### 6) Presentation generation, visuals etc.
+
+Come back to this at a later stage. Enough results for now. Thinking big picture.
+
+
+#### 7) Extended Segment Analysis - Intersectionality
+
+**What specifically is driving the change to the right-wing amongst younger men? Is the ongoing shift about women moving more left, or is it also about men moving more right**
+
+**Can we find evidence for the claims posited in the article read by the CEO on this issue?**
+
+
+Need to narrow down an effective methodology for examining segmented trends within the survey model approach.
+
+- Religious intersectionality: gender gaps within Christian/Muslim/secular young people
+- Ethnic polarization matrix: white vs minority young men/women patterns  
+- Education-class intersections: degree vs non-degree effects on gender gaps
+- Geographic mapping: urban/rural and constituency-level polarization hotspots
+- Polarization intensity metrics: identify most extreme vs moderate young segments
+- Attitude clustering: natural groupings and messaging archetypes for corporate strategy
+- "Movement" analysis: who is shifting away from older generational patterns most
+- Issue-specific drivers: which attitudes (social vs economic) drive overall polarization
+
+- Specifically, who is becoming more right-wing? Are there any predictors of actual shifts
+
+Currently thinking to create a polarization index, which measures how far someone is from the mean on both social and economic dimensions. Then we can see who is most polarized, and what predicts this.
 
 ### Personal Notes
 
@@ -733,4 +1015,10 @@ svymean(\~variable_of_interest, design)
 
 -   you really need to make sure you are following all survey-design inferences, like weighted t tests, standard errors accounting for stratification, clustering and unequal selection probabilities. Generally need to refresh these points
 
-- how should you make claims and interpretations in survey inference? and really understand what weights mean in the survey context?
+-   how should you make claims and interpretations in survey inference? and really understand what weights mean in the survey context?
+
+-   What's the exact difference between survey glm and just a normal linear model? like those found in survey package. What is the point of the design objects? what is the clustering parameters? 
+
+-   review multilevel regression with poststratification
+
+-   come back to the survey design when you figure out stratification more explicitly to ensure you are doing it correctly
