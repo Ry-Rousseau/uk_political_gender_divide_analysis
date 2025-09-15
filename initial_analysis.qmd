@@ -1,0 +1,549 @@
+---
+title: "initial_exploration"
+format: html
+editor: visual
+---
+
+```{r}
+#| echo: false
+```
+
+#### research questions:
+
+what evidence of this ideological gender divide exists in the UK and is it different across generations?
+
+young peopleʼs attitudes and if we can challenge the idea theyʼre a monolith
+
+how do the above translate into public-facing guidance for the FTSE CEO?
+
+what is the divide? do economic or social views drive the divide that we're experiencing? can this be drilled down into specific areas of either? 
+
+```{r}
+source('scripts/setup.R')
+```
+#### Analysis plan
+
+1) Verify data integrity, create composite social/economic scales
+
+2) Generate average scorings based on age-group, calculate differences by individual to age-group scores - how do individual differ from their age cohort?
+
+3) Quantify the size of gender differences in liberal/authoritarian attitudes across age groups:
+-   did the 2024 vote exhibit the gender gap? (age/vote distribution by party vote 2024)
+-   is the gap wider amongst younger generations vs. other? (gap size by age band)
+-   
+
+4) Modelling stage - how does age, gender, other demographics predict ideology?
+-   how can we predict party vote, conservatism, economic leftism using the demographic information that we have (weighted regression)? 
+
+5) Segmented modelling - how do young people experience different effects to those of all voters? 
+- Forest plot comparing model coefficients (full sample vs. young people)
+- Predicted value plot incorporating gender/age from the model
+
+5) Visualization creation, draw out most relevant insights from the above stages
+
+6) Extended segment analysis 
+-   What specific ideological markers are significant for corporate positioning strategy? What specific dimension is driving the growing gender divide for the future?
+-   is this happening mostly in urban areas? can we merge in additional data via use of constituency codes? 
+
+7) Based on above results, incorporate into a unified tracking function
+-   Test this function using survey waves from randomly selected batches from the main data, label for multiple months as proof of concept working.
+
+### How do we measure political ideology? 
+
+1) social preferences - conservatism variable
+
+2) economic preferences - economic leftism variable
+
+3) 2024 party vote - between reform, labour, greens, conservatives, etc.
+
+4) Tailored topic viewpoints - big business, traditional values, death penalty etc.
+
+<!-- First stage analysis (basically, where do things stand now?, what is the state of the gender gap across generations from the information that we have now?): -->
+
+<!-- -   Quantify the size of gender differences in liberal/authoritarian attitudes across age groups -->
+<!-- -   Show if the gap is wider among younger generations (18-34) vs other -->
+<!-- -   Key metric: Gap size in composite social attitudes scale by age band -->
+
+<!-- -   weighted regression model - effect of age, gender, age:gender interaction, education, ethnicity, region, household, religion, social_grade classification, marital status on conservatism + economic leftism + combined right-wing score -->
+
+<!-- 3) Specific guidance - how can messaging and PR change for the company? -->
+
+<!-- -   Challenge the "young monolith" assumption by showing attitude distributions within 18-34 demographic -->
+<!-- -   Segment young men vs young women across both economic and social dimensions -->
+<!-- -   Identify distinct clusters for targeted messaging -->
+
+<!-- 4) Tracking Dashboard Framework -->
+
+<!-- -   Automated functions to monitor changes over time -->
+<!-- -   Key indicators: gender gap trends, generational shifts, attitude polarization metrics -->
+<!-- -   Proof of concept using monthly splits from current data -->
+
+#### 1) Verify data quality/integrity
+
+```{r}
+library(VIM)
+#VIM::aggr(uk_data, plot = FALSE)
+
+#unique(uk_data$eu_ref)
+
+
+# we treat don't know as missing data
+# sapply(uk_data[,c(3:6, 11:27)], unique)
+
+# apply unique to all data
+
+# encode NA's appropriately
+uk_data <- uk_data %>%
+  mutate(across(everything(), ~case_when(
+    .x == "Don't know" ~ NA,
+    .x == "dk" ~ NA,
+    .x == "no_answer" ~ NA,           # religion column
+    .x == "prefer_not_to_say" ~ NA,   # marital column
+    TRUE ~ .x
+  )))
+
+VIM::aggr(uk_data, plot = FALSE)
+
+```
+
+Generally very few NAs in the data. Roughly equal rates across survey questions.
+
+#### 2) Create Composite Economic/Social Ideology Scales
+
+```{r}
+# Function to recode attitude responses to -1 to 1 scale
+recode_attitude <- function(x) {
+  case_when(
+    x == "Strongly agree" ~ 1,
+    x == "Agree" ~ 0.5,
+    x == "Neither agree nor disagree" ~ 0,
+    x == "Disagree" ~ -0.5,
+    x == "Strongly disagree" ~ -1,
+    TRUE ~ NA_real_
+  )
+}
+
+# Convert attitude variables to numeric and create scales
+uk_data_test <- uk_data %>%
+  mutate(
+    # Convert social attitude variables to numeric (-2 to 2 scale)
+    soc_respect = recode_attitude(soc_respect),
+    soc_deathpen = recode_attitude(soc_deathpen),
+    soc_schools = recode_attitude(soc_schools),
+    soc_censor = recode_attitude(soc_censor),
+    soc_punish = recode_attitude(soc_punish),
+    # Convert economic attitude variables to numeric (-2 to 2 scale)
+    econ_redist = recode_attitude(econ_redist),
+    econ_bigbiz = recode_attitude(econ_bigbiz),
+    econ_unfair = recode_attitude(econ_unfair),
+    econ_onelaw = recode_attitude(econ_onelaw),
+    econ_exploit = recode_attitude(econ_exploit)) %>% 
+  rowwise() %>%
+  mutate(
+    social_conservatism = mean(c_across(c(soc_respect, soc_deathpen, soc_schools, soc_censor, soc_punish)), na.rm = TRUE),
+    economic_leftism = mean(c_across(c(econ_redist, econ_bigbiz, econ_unfair, econ_onelaw, econ_exploit)), na.rm = TRUE),
+    social_na_count = sum(is.na(c_across(c(soc_respect, soc_deathpen, soc_schools, soc_censor, soc_punish)))),
+    economic_na_count = sum(is.na(c_across(c(econ_redist, econ_bigbiz, econ_unfair, econ_onelaw, econ_exploit))))
+  ) %>%
+  ungroup()
+
+uk_data <- uk_data_test
+
+summary(uk_data_test$social_conservatism)
+
+uk_data_test %>% 
+  filter(is.na(social_conservatism)) %>% 
+  print()
+```
+
+above scale creation could be optimized for efficiency but is good code. Rowwise operations decrease efficiency, could be eliminated.
+
+Interpreting the scales:
+- agreement with the social questions implies high social conservatism
+- agreement with the economic questions implise high economic leftism
+
+#### 3) Quantify size of gender differences across age groups
+
+##### Vote shares in 2024 election by Gender and Age Bands
+
+```{r}
+# create a visualization that shows, for each gender in each age band, their vote split in the 2024 election
+
+# First, let's examine the vote choices available
+cat("Available 2024 vote choices:\n")
+print(unique(uk_data$pv_2024))
+
+# Calculate weighted vote shares by gender and age group
+vote_shares <- uk_data %>%
+  filter(!is.na(pv_2024) & !is.na(gender) & !is.na(age)) %>%
+  group_by(age, gender, pv_2024) %>%
+  summarise(
+    weighted_count = sum(wt, na.rm = TRUE),
+    .groups = "keep"
+  ) %>%
+  group_by(age, gender) %>%
+  mutate(
+    total_weighted = sum(weighted_count),
+    vote_share = weighted_count / total_weighted * 100
+  ) %>%
+  ungroup()
+
+# Display the data
+print("Vote shares by age, gender, and party:")
+print(vote_shares)
+
+# visualization - side-by-side comparison for key parties
+major_parties <- vote_shares %>%
+  filter(pv_2024 %in% c("con", "lab", "ldm", "rfm", "grn"))
+
+ggplot(major_parties, aes(x = age, y = vote_share, fill = gender)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~pv_2024, scales = "free_y") +
+  labs(
+    title = "Gender Differences in 2024 Vote Choice by Age Group",
+    subtitle = "Side-by-side comparison for major parties",
+    x = "Age Group",
+    y = "Vote Share (%)",
+    fill = "Gender"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold")
+  ) +
+  scale_fill_manual(values = c("male" = "lightblue", "female" = "pink"))
+```
+
+##### Average social conservatism by gender/age bands
+
+```{r}
+# Load survey package for proper weighted calculations
+library(survey)
+
+# Create survey design object
+survey_design <- svydesign(
+  ids = ~1,  # no clustering
+  weights = ~wt,
+  data = uk_data %>% filter(!is.na(social_conservatism) & !is.na(gender) & !is.na(age))
+)
+
+# Calculate survey-weighted means by age and gender
+social_conservatism_means <- svyby(
+  ~social_conservatism,
+  ~age + gender,
+  design = survey_design,
+  FUN = svymean,
+  na.rm = TRUE
+)
+
+# Convert to data frame and clean up
+social_conservatism_means <- as.data.frame(social_conservatism_means) %>%
+  rename(mean_social_conservatism = social_conservatism)
+
+# Display the results
+print("Survey-weighted means by age and gender:")
+print(social_conservatism_means)
+
+# Create barplot
+ggplot(social_conservatism_means, aes(x = age, y = mean_social_conservatism, fill = gender)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(aes(ymin = mean_social_conservatism - se,
+                    ymax = mean_social_conservatism + se),
+                position = position_dodge(width = 0.9), width = 0.25, alpha = 0.7) +
+  labs(
+    title = "Average Social Conservatism Scores by Age Group and Gender",
+    subtitle = "Survey-weighted means with standard errors. Higher scores = more conservative",
+    x = "Age Group",
+    y = "Mean Social Conservatism Score",
+    fill = "Gender"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("male" = "lightblue", "female" = "pink"))
+```
+
+##### Average economic leftism by gender/age bands
+
+```{r}
+# Calculate survey-weighted means for economic leftism by age and gender
+economic_leftism_means <- svyby(
+  ~economic_leftism,
+  ~age + gender,
+  design = survey_design,
+  FUN = svymean,
+  na.rm = TRUE
+)
+
+# Convert to data frame and clean up
+economic_leftism_means <- as.data.frame(economic_leftism_means) %>%
+  rename(mean_economic_leftism = economic_leftism)
+
+# Display the results
+print("Survey-weighted economic leftism means by age and gender:")
+print(economic_leftism_means)
+
+# Create barplot
+ggplot(economic_leftism_means, aes(x = age, y = mean_economic_leftism, fill = gender)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(aes(ymin = mean_economic_leftism - se,
+                    ymax = mean_economic_leftism + se),
+                position = position_dodge(width = 0.9), width = 0.25, alpha = 0.7) +
+  labs(
+    title = "Average Economic Leftism Scores by Age Group and Gender",
+    subtitle = "Survey-weighted means with standard errors. Higher scores = more left-wing",
+    x = "Age Group",
+    y = "Mean Economic Leftism Score",
+    fill = "Gender"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("male" = "lightblue", "female" = "pink"))
+```
+
+##### Average social conservatism by exact age 
+
+
+
+##### Average economic leftism by exact age 
+
+
+
+```{r}
+# 1. Average Attitude Scores by Gender and Age Groups
+attitude_heatmap_data <- uk_data %>%
+  group_by(age, gender) %>%
+  summarise(
+    social_conservatism = weighted.mean(social_conservatism, wt, na.rm = TRUE),
+    economic_leftism = weighted.mean(economic_leftism, wt, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = c(social_conservatism, economic_leftism),
+               names_to = "attitude_dimension",
+               values_to = "mean_score") %>%
+  filter(!is.na(mean_score) & !is.na(gender))
+
+# Heatmap 1: Mean Attitude Scores
+ggplot(attitude_heatmap_data, aes(x = age, y = paste(gender, attitude_dimension), fill = mean_score)) +
+  geom_tile(color = "white", size = 0.5) +
+  geom_text(aes(label = round(mean_score, 2)), color = "white", size = 3, fontface = "bold") +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0,
+                       name = "Mean\nScore") +
+  labs(title = "Average Political Attitudes by Gender and Age",
+       subtitle = "Higher scores = more conservative (social) / more leftist (economic)",
+       x = "Age Group", y = "Gender × Attitude Dimension") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(size = 14, face = "bold"))
+
+# 3. Sample Size Check Heatmap
+sample_sizes <- uk_data %>%
+  group_by(age, gender) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  filter(!is.na(gender))
+
+ggplot(sample_sizes, aes(x = age, y = gender, fill = n)) +
+  geom_tile(color = "white", size = 0.5) +
+  geom_text(aes(label = n), color = "white", size = 3, fontface = "bold") +
+  scale_fill_gradient(low = "lightgray", high = "darkgreen", name = "Sample\nSize") +
+  labs(title = "Sample Sizes by Age and Gender",
+       subtitle = "Check for adequate representation across groups",
+       x = "Age Group", y = "Gender") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# 4. Clustering Heatmaps for All Survey Responses by Age Group
+library(pheatmap)
+library(RColorBrewer)
+
+# Prepare data for clustering - all attitude questions
+attitude_vars <- c("soc_respect", "soc_deathpen", "soc_schools", "soc_censor", "soc_punish",
+                   "econ_redist", "econ_bigbiz", "econ_unfair", "econ_onelaw", "econ_exploit")
+
+# Get unique age groups
+age_groups <- unique(uk_data$age[!is.na(uk_data$age)])
+
+# Create clustering heatmap for each age group
+for(age_group in age_groups) {
+
+  cat("\n### Correlation Heatmap for", age_group, "Age Group\n")
+
+  # Filter data for this age group and select attitude variables
+  age_data <- uk_data %>%
+    filter(age == age_group, !is.na(age)) %>%
+    select(all_of(attitude_vars), wt) %>%
+    filter(complete.cases(.))
+
+  # Skip if insufficient data
+  if(nrow(age_data) < 50) {
+    cat("Insufficient data for", age_group, "(n =", nrow(age_data), ")\n")
+    next
+  }
+
+  # Calculate correlation matrix
+  corr_data <- age_data %>% select(-wt)
+  numeric_matrix <- as.matrix(corr_data)
+  corr_matrix <- cor(numeric_matrix, use = "complete.obs")
+
+  # Create and print heatmap
+  p <- pheatmap(corr_matrix,
+                main = paste("Survey Response Correlations -", age_group),
+                color = colorRampPalette(c("#2166AC", "white", "#B2182B"))(100),
+                breaks = seq(-1, 1, length.out = 101),
+                display_numbers = TRUE,
+                number_color = "black",
+                fontsize = 12,
+                fontsize_number = 8,
+                cluster_rows = TRUE,
+                cluster_cols = TRUE,
+                show_rownames = TRUE,
+                show_colnames = TRUE,
+                angle_col = 45,
+                cellwidth = 40,
+                cellheight = 40,
+                border_color = "grey90",
+                silent = FALSE)
+
+  print(p)
+  cat("\nSample size for", age_group, ":", nrow(age_data), "respondents\n")
+}
+
+```
+
+
+
+```{r}
+# Calculate weighted means by gender and age for social attitudes
+social_gaps <- uk_data %>%
+  filter(!is.na(social_conservatism) & !is.na(gender) & !is.na(age)) %>%
+  group_by(age, gender) %>%
+  summarise(
+    weighted_mean = weighted.mean(social_conservatism, wt, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(names_from = gender, values_from = weighted_mean) %>%
+  mutate(gender_gap = male - female) %>%
+  filter(!is.na(gender_gap))
+
+# Display the data
+print("Social Attitudes Gender Gap by Age Group:")
+print(social_gaps)
+
+# Create the chart
+ggplot(social_gaps, aes(x = age, y = gender_gap, group = 1)) +
+  geom_line(color = "steelblue", size = 1.2) +
+  geom_point(color = "steelblue", size = 3) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  labs(
+    title = "Gender Gap in Social Attitudes by Age Group",
+    subtitle = "Higher values = men more authoritarian than women",
+    x = "Age Group",
+    y = "Gender Gap (Male - Female)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+##### Economic Attitudes Gender Gap by Age Group
+
+```{r}
+# Calculate weighted means by gender and age for economic attitudes
+economic_gaps <- uk_data %>%
+  filter(!is.na(economic_leftism) & !is.na(gender) & !is.na(age)) %>%
+  group_by(age, gender) %>%
+  summarise(
+    weighted_mean = weighted.mean(economic_leftism, wt, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(names_from = gender, values_from = weighted_mean) %>%
+  mutate(gender_gap = male - female) %>%
+  filter(!is.na(gender_gap))
+
+# Display the data
+print("Economic Attitudes Gender Gap by Age Group:")
+print(economic_gaps)
+
+# Create the chart
+ggplot(economic_gaps, aes(x = age, y = gender_gap, group = 1)) +
+  geom_line(color = "darkred", size = 1.2) +
+  geom_point(color = "darkred", size = 3) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  labs(
+    title = "Gender Gap in Economic Attitudes by Age Group",
+    subtitle = "Higher values = men more left-wing than women",
+    x = "Age Group",
+    y = "Gender Gap (Male - Female)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+##### Gender gap by age band - social conservatism
+
+
+
+##### Gender gap by age band - economic leftism 
+
+```{r}
+# Combine both gaps for comparison
+combined_gaps <- bind_rows(
+  social_gaps %>% mutate(dimension = "Social Attitudes") %>% select(age, gender_gap, dimension),
+  economic_gaps %>% mutate(dimension = "Economic Attitudes") %>% select(age, gender_gap, dimension)
+)
+
+# Display combined data
+print("Combined Gender Gaps Across Dimensions:")
+print(combined_gaps)
+
+# Create heatmap
+ggplot(combined_gaps, aes(x = age, y = dimension, fill = abs(gender_gap))) +
+  geom_tile(color = "white", size = 0.5) +
+  geom_text(aes(label = round(gender_gap, 2)), color = "white", fontface = "bold") +
+  scale_fill_gradient(low = "lightblue", high = "darkblue", name = "Gap\nMagnitude") +
+  labs(
+    title = "Gender Gap Magnitude Across Dimensions and Age Groups",
+    subtitle = "Values show actual gap size (Male - Female)",
+    x = "Age Group",
+    y = "Attitude Dimension"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Summary statistics
+print("Summary of Gender Gaps:")
+summary_stats <- combined_gaps %>%
+  group_by(dimension) %>%
+  summarise(
+    mean_gap = mean(abs(gender_gap), na.rm = TRUE),
+    max_gap = max(abs(gender_gap), na.rm = TRUE),
+    min_gap = min(abs(gender_gap), na.rm = TRUE),
+    largest_gap_age = age[which.max(abs(gender_gap))],
+    .groups = "drop"
+  )
+print(summary_stats)
+```
+
+
+
+
+
+### Personal Notes
+
+- Figure out if you need to use stratification - what's the best way to create weighted means? Examine the use of:
+
+library(survey)
+design <- svydesign(
+  ids = ~cluster_var,     # clustering variable (use ~1 if no clustering)
+  strata = ~strata_var,   # stratification variable (optional)
+  weights = ~weight_var,  # survey weights
+  data = your_data
+)
+
+svymean(~variable_of_interest, design)
+
+- create color blind scheme for visualizations - orange and blue
+
+- think carefully about the y-axis on the charts
+

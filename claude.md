@@ -36,7 +36,7 @@ This project analyzes the ideological gender divide in UK politics for a FTSE 10
 
 ### Demographics
 - `respondent_id`: Unique anonymized ID
-- `weight`: National representativity weight
+- `wt`: National representativity weight
 - `age`: Age band
 - `gender`: Gender
 - `education`: Education level (degree vs non-degree)

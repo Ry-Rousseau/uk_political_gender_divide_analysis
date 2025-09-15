@@ -4,6 +4,8 @@
 # Load required packages
 library(tidyverse)
 library(haven)  # for reading SPSS files
+library(estimatr) # for robust lin regression
+library(survey) # package for survey analysis
 
 # Load the data
 cat("Loading UK Election Study data...\n")
