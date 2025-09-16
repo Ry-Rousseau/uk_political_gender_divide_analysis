@@ -1,12 +1,21 @@
 ---
-title: "initial_exploration"
+title: "Your Document Title"
 format: html
-editor: visual
+execute:
+  echo: true          # Show code chunks
+  warning: false      # Hide warnings
+  error: false        # Hide error messages
+  message: false      # Hide messages (like library loading messages)
+  cache: false        # Set to true if you want to cache results
+  freeze: auto        # Prevents re-execution unless code changes
+knitr:
+  opts_chunk:
+    fig.align: center  # Center figures
+    fig.width: 8       # Default figure width
+    fig.height: 6      # Default figure height
+    out.width: "80%"   # Scale output width
+    dpi: 300          # High resolution figures
 ---
-
-```{r}
-#| echo: false
-```
 
 #### research questions:
 
@@ -50,7 +59,7 @@ source('scripts/setup.R')
 -   What specific ideological markers are significant for corporate positioning strategy? What specific dimension is driving the growing gender divide for the future?
 -   is this happening mostly in urban areas? can we merge in additional data via use of constituency codes?
 
-7)  Based on above results, incorporate into a unified tracking function
+8)  Based on above results, incorporate into a unified tracking function in new document
 
 -   Test this function using survey waves from randomly selected batches from the main data, label for multiple months as proof of concept working.
 
@@ -168,9 +177,13 @@ uk_data_test %>%
   print()
 ```
 
-above scale creation could be optimized for efficiency but is good code. Rowwise operations decrease efficiency, could be eliminated.
+above scale creation could be optimized for efficiency down the line. Rowwise operations decrease efficiency, could be eliminated.
 
-Interpreting the scales: - agreement with the social questions implies high social conservatism - agreement with the economic questions implise high economic leftism
+Interpreting the scales: 
+-   agreement with the social questions implies high social conservatism 
+-   agreement with the economic questions implise high economic leftism
+
+We expect a traditionally 'ri
 
 #### 3) Quantify size of gender differences across age groups
 
@@ -976,7 +989,7 @@ cat("Older (35+):", round(economic_older_gender[1], 3), "p =", round(economic_ol
 
 #### 6) Presentation generation, visuals etc.
 
-Come back to this at a later stage. Enough results for now. Thinking big picture.
+Come back to this at a later stage. Enough results for now to move onto the function generation.
 
 
 #### 7) Extended Segment Analysis - Intersectionality
@@ -985,8 +998,132 @@ Come back to this at a later stage. Enough results for now. Thinking big picture
 
 **Can we find evidence for the claims posited in the article read by the CEO on this issue?**
 
+##### Vote Switching Analysis: Left-to-Right Shifters 2019-2024
 
-Need to narrow down an effective methodology for examining segmented trends within the survey model approach.
+```{r}
+# Identify vote switchers from left-wing to right-wing parties
+# Define party classifications
+left_parties <- c("lab", "grn", "ldm")  # Labour, Green, Lib Dem
+right_parties <- c("con", "rfm")        # Conservative, Reform
+
+# Create switching analysis dataset
+vote_switchers <- uk_data %>%
+  filter(!is.na(pv_2019) & !is.na(pv_2024)) %>%
+  mutate(
+    voted_left_2019 = pv_2019 %in% left_parties,
+    voted_right_2024 = pv_2024 %in% right_parties,
+    left_to_right_switch = voted_left_2019 & voted_right_2024
+  )
+
+# Summary of switching patterns
+cat("=== VOTE SWITCHING SUMMARY ===\n")
+switching_summary <- vote_switchers %>%
+  group_by(voted_left_2019, voted_right_2024) %>%
+  summarise(
+    count = n(),
+    weighted_count = sum(wt, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(percentage = round(weighted_count / sum(weighted_count) * 100, 1))
+
+print(switching_summary)
+
+# Focus on left-to-right switchers
+left_to_right_switchers <- vote_switchers %>%
+  filter(left_to_right_switch == TRUE)
+
+cat("\nTotal left-to-right switchers:", nrow(left_to_right_switchers))
+cat("\nWeighted count:", round(sum(left_to_right_switchers$wt, na.rm = TRUE)))
+
+# Demographics of left-to-right switchers vs non-switchers
+cat("\n=== DEMOGRAPHICS OF LEFT-TO-RIGHT SWITCHERS ===\n")
+
+# Gender breakdown
+gender_switching <- vote_switchers %>%
+  group_by(gender, left_to_right_switch) %>%
+  summarise(
+    weighted_count = sum(wt, na.rm = TRUE),
+    .groups = "keep"
+  ) %>%
+  group_by(gender) %>%
+  mutate(
+    total = sum(weighted_count),
+    switch_rate = round(weighted_count[left_to_right_switch == TRUE] / total * 100, 1)
+  ) %>%
+  filter(left_to_right_switch == TRUE) %>%
+  select(gender, switch_rate)
+
+print("Left-to-right switching rates by gender:")
+print(gender_switching)
+
+# Age breakdown
+age_switching <- vote_switchers %>%
+  group_by(age, left_to_right_switch) %>%
+  summarise(
+    weighted_count = sum(wt, na.rm = TRUE),
+    .groups = "keep"
+  ) %>%
+  group_by(age) %>%
+  mutate(
+    total = sum(weighted_count),
+    switch_rate = round(weighted_count[left_to_right_switch == TRUE] / total * 100, 1)
+  ) %>%
+  filter(left_to_right_switch == TRUE) %>%
+  select(age, switch_rate) %>%
+  arrange(desc(switch_rate))
+
+print("\nLeft-to-right switching rates by age:")
+print(age_switching)
+
+# Education breakdown
+education_switching <- vote_switchers %>%
+  filter(!is.na(education)) %>%
+  group_by(education, left_to_right_switch) %>%
+  summarise(
+    weighted_count = sum(wt, na.rm = TRUE),
+    .groups = "keep"
+  ) %>%
+  group_by(education) %>%
+  mutate(
+    total = sum(weighted_count),
+    switch_rate = round(weighted_count[left_to_right_switch == TRUE] / total * 100, 1)
+  ) %>%
+  filter(left_to_right_switch == TRUE) %>%
+  select(education, switch_rate)
+
+print("\nLeft-to-right switching rates by education:")
+print(education_switching)
+
+# Predictive model for left-to-right switching
+switching_model <- vote_switchers %>%
+  filter(!is.na(gender) & !is.na(age) & !is.na(education) & !is.na(ethnicity))
+
+# Create survey design for switching analysis
+survey_design_switching <- svydesign(
+  ids = ~1,
+  weights = ~wt,
+  data = switching_model
+)
+
+# Logistic regression predicting left-to-right switching
+switch_prediction_model <- svyglm(
+  left_to_right_switch ~ gender + age + education + ethnicity + region + religion,
+  design = survey_design_switching,
+  family = binomial(link = "logit")
+)
+
+summary(switch_prediction_model)
+
+nobs(switch_prediction_model)
+```
+
+Being aged 25 to 34 is positively associated with switching from left to right in terms of party vote. Further analysis can be done on this and on the specific points, if it's deemed necessary down the line.
+
+**Further steps**
+
+Need to narrow down an effective methodology for examining segmented trends within the survey model approach. We can't say if these samples generalize to the entirety of the UK since segmentation + weighting disrupts the survey design.
+
+Currently thinking to create a polarization index, which measures how far someone is from the mean on both social and economic dimensions. Then we can see who is most polarized, and what predicts this.
 
 - Religious intersectionality: gender gaps within Christian/Muslim/secular young people
 - Ethnic polarization matrix: white vs minority young men/women patterns  
@@ -997,28 +1134,3 @@ Need to narrow down an effective methodology for examining segmented trends with
 - "Movement" analysis: who is shifting away from older generational patterns most
 - Issue-specific drivers: which attitudes (social vs economic) drive overall polarization
 
-- Specifically, who is becoming more right-wing? Are there any predictors of actual shifts
-
-Currently thinking to create a polarization index, which measures how far someone is from the mean on both social and economic dimensions. Then we can see who is most polarized, and what predicts this.
-
-### Personal Notes
-
--   Figure out if you need to use stratification - what's the best way to create weighted means? Examine the use of:
-
-library(survey) design \<- svydesign( ids = \~cluster_var, \# clustering variable (use \~1 if no clustering) strata = \~strata_var, \# stratification variable (optional) weights = \~weight_var, \# survey weights data = your_data )
-
-svymean(\~variable_of_interest, design)
-
--   create color blind scheme for visualizations - orange and blue
-
--   think carefully about the y-axis on the charts
-
--   you really need to make sure you are following all survey-design inferences, like weighted t tests, standard errors accounting for stratification, clustering and unequal selection probabilities. Generally need to refresh these points
-
--   how should you make claims and interpretations in survey inference? and really understand what weights mean in the survey context?
-
--   What's the exact difference between survey glm and just a normal linear model? like those found in survey package. What is the point of the design objects? what is the clustering parameters? 
-
--   review multilevel regression with poststratification
-
--   come back to the survey design when you figure out stratification more explicitly to ensure you are doing it correctly
