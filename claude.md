@@ -36,10 +36,10 @@ This project analyzes the ideological gender divide in UK politics for a FTSE 10
 
 ### Demographics
 - `respondent_id`: Unique anonymized ID
-- `wt`: National representativity weight
+- `wt`: National representativity weight (based on age, gender, region, ethnicity, education)
 - `age`: Age band
 - `gender`: Gender
-- `education`: Education level (degree vs non-degree)
+- `education`: Education level (lower or higher than degree level)
 - `ethnicity`: Ethnicity
 - `region`: UK NUTS1 region
 - `cons_code`: Westminster constituency code
@@ -136,3 +136,49 @@ This project analyzes the ideological gender divide in UK politics for a FTSE 10
 - Focus on business implications of findings
 - Ensure all code is well-documented for handover
 - Test tracking functions with subset of data before full implementation
+
+### Unique values for categorical variables
+
+$age
+[1] "25_TO_34" "18_TO_24" "55_TO_64" "35_TO_44" "65_TO_74" "75_PLUS"  "45_TO_54"
+
+$gender
+[1] "male"   "female"
+
+$education
+[1] "low"  "high"
+
+$ethnicity
+[1] "white" "other" "asian" "black" "mixed"
+
+$region
+ [1] "East of England"          "South West England"       "South East England"      
+ [4] "West Midlands"            "Scotland"                 "North West England"      
+ [7] "Wales"                    "Greater London"           "Yorkshire and the Humber"
+[10] "East Midlands"            "North East England"      
+
+$household
+[1] "owns_with_mortgage_or_shared" "private_rented_or_rent_free" 
+[3] "social_rented"                "owns_outright"               
+
+$religion
+[1] "none"      "christian" "muslim"    "hindu"     "other"     NA         
+
+$socgrad
+[1] "C2" "AB" "DE" "C1"
+
+$marital
+[1] "relationship_notliving" "single"                 "relationship_living"   
+[4] "widowed"                "married_civil"          "separated_divorced"    
+[7] NA                      
+
+$pv_2019
+[1] "dnv" "ldm" "con" "brx" "snp" "lab" "grn" "oth" "pcy"
+
+$pv_2024
+[1] "rfm" "lab" "con" "grn" "wnv" "ldm" "snp" "oth" "pcy"
+
+$eu_ref
+[1] "leave"  "dnv"    "remain" NA      
+
+
