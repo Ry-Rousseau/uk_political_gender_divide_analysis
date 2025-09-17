@@ -1,0 +1,1103 @@
+---
+title: "Future Data Waves Processing Demo"
+format: html
+execute:
+  echo: true          # Show code chunks
+  warning: false      # Hide warnings
+  error: false        # Hide error messages
+  message: false      # Hide messages (like library loading messages)
+  cache: false        # Set to true if you want to cache results
+  freeze: auto        # Prevents re-execution unless code changes
+knitr:
+  opts_chunk:
+    fig.align: center  # Center figures
+    fig.width: 8       # Default figure width
+    fig.height: 6      # Default figure height
+    out.width: "80%"   # Scale output width
+    dpi: 300          # High resolution figures
+---
+
+### Setup
+Created all mock data waves in data/mock_waves using scripts/stratified_data_splitter.R. 
+
+These waves maintain national representativeness by balancing demographic splits from the original stratification methodology, and are realistic survey waves, however since they are all sampled from the provided data, they all show near-identical trends/effects. 
+
+The below visualizations can all be combined into an automated script but are separated here for clarity.
+
+We'll firstly load the survey waves and packages using a demo setup script. I'll assume that 1) mock_waves includes only survey waves in sav format 2) files have standard naming conventions for files ("wave_1.sav") and variables 3) waves carried out in discrete calendar months 
+```{r}
+source("scripts/functions.R")
+
+source("scripts/setup_demo.R")
+
+```
+
+Now we can process each wave in turn, creating our variables for our existing analysis pipeline.
+
+I'll be displaying the larger, more involved functions in this notebook, but smaller functions are in scripts/functions.R.
+
+```{r}
+
+clean_data_and_create_ideology_scales <- function(wave_data, wave_name){
+  cleaned_data <- wave_data %>%
+  mutate(across(-survey_date, ~case_when(
+    .x == "Don't know" ~ NA,
+    .x == "dk" ~ NA,
+    .x == "no_answer" ~ NA,           # religion column
+    .x == "prefer_not_to_say" ~ NA,   # marital column
+    TRUE ~ .x
+  ))) %>% 
+  # create gender age variable for analysis - removing NA's
+  mutate(gender_age = str_c(gender,age , sep = "_", na.rm = TRUE)) %>% 
+    
+  # Convert attitude variables to numeric and create scales
+  mutate(
+    # Convert social attitude variables to numeric (-1 to 1 scale)
+    soc_respect = recode_attitude_0_to_1(soc_respect),
+    soc_deathpen = recode_attitude_0_to_1(soc_deathpen),
+    soc_schools = recode_attitude_0_to_1(soc_schools),
+    soc_censor = recode_attitude_0_to_1(soc_censor),
+    soc_punish = recode_attitude_0_to_1(soc_punish),
+    # Convert economic attitude variables to numeric (-1 to 1 scale)
+    econ_redist = recode_attitude_0_to_1(econ_redist),
+    econ_bigbiz = recode_attitude_0_to_1(econ_bigbiz),
+    econ_unfair = recode_attitude_0_to_1(econ_unfair),
+    econ_onelaw = recode_attitude_0_to_1(econ_onelaw),
+    econ_exploit = recode_attitude_0_to_1(econ_exploit)) %>% 
+  rowwise() %>%
+  mutate(
+    social_conservatism = mean(c_across(c(soc_respect, soc_deathpen, soc_schools, soc_censor, soc_punish)), na.rm = TRUE),
+    economic_rightism = 1 - mean(c_across(c(econ_redist, econ_bigbiz, econ_unfair, econ_onelaw, econ_exploit)), na.rm = TRUE),
+    social_na_count = sum(is.na(c_across(c(soc_respect, soc_deathpen, soc_schools, soc_censor, soc_punish)))),
+    economic_na_count = sum(is.na(c_across(c(econ_redist, econ_bigbiz, econ_unfair, econ_onelaw, econ_exploit))))
+  ) %>%
+  ungroup() %>% 
+  # Convert survey items back to [-1, -0.5, 0, 0.5, 1] scale for easier interpretation along intuitive agree-disagree continuum
+  mutate(
+    soc_respect = soc_respect * 2 - 1,
+    soc_deathpen = soc_deathpen * 2 - 1,
+    soc_schools = soc_schools * 2 - 1,
+    soc_censor = soc_censor * 2 - 1,
+    soc_punish = soc_punish * 2 - 1,
+    econ_redist = econ_redist * 2 - 1,
+    econ_bigbiz = econ_bigbiz * 2 - 1,
+    econ_unfair = econ_unfair * 2 - 1,
+    econ_onelaw = econ_onelaw * 2 - 1,
+    econ_exploit = econ_exploit * 2 - 1
+  ) %>% 
+  # Add month, year, wave column
+  mutate(
+    month_year = year(survey_date), 
+    month = month(survey_date), # numeric month
+    month_name = month(survey_date, label = TRUE, abbr = TRUE), # Jan, Feb etc.
+  )
+  return(cleaned_data)
+}
+
+# Process each wave
+processed_waves <- lapply(names(data_waves), function(wave_name) {
+  wave_data <- data_waves[[wave_name]]
+  clean_data_and_create_ideology_scales(wave_data, wave_name)
+})
+
+# Create combined data
+combined_data <- bind_rows(processed_waves)
+
+# Examine a wave to verify processing
+glimpse(processed_waves[[1]])
+
+
+```
+
+
+Create a battery of visuals that track ideological trends over time. These will follow on from the visualizations in the main analysis pipeline.
+
+#### Gender Gap Trends by Age Group Over Time
+
+```{r}
+
+# Loop over all the processed waves and survey design objects
+
+calculate_gender_gap_no_age <- function(processed_waves) {
+  mean_gap_results <- list()
+  i <- 1
+  for (wave in processed_waves) {
+    
+    wave = processed_waves[[1]]
+    survey_design <- svydesign(ids = ~1, data = wave, weights = ~wt)
+    
+    # Calculate survey-weighted means by age and gender - conservatism
+    social_conservatism_means <- svyby(
+      ~social_conservatism,
+      ~age + gender,
+      design = survey_design,
+      FUN = svymean,
+      na.rm = TRUE
+    ) %>% 
+      rename(social_conservatism_mean = social_conservatism)
+    
+    # Calculate survey-weighted means by age and gender - economic rightism
+    economic_rightism_means <- svyby(
+    ~economic_rightism,
+    ~age + gender,
+    design = survey_design,
+    FUN = svymean,
+    na.rm = TRUE
+  ) %>% 
+    rename(economic_rightism_mean = economic_rightism)
+    
+    # Merge together
+    means_conservatism_rightism <- economic_rightism_means %>%
+    left_join(social_conservatism_means, by = c("age", "gender"), suffix = c("_econ", "_soc")) %>% 
+    # add wave identifier
+    mutate(wave = i)
+    
+    # save to list
+    mean_gap_results[[i]] <- means_conservatism_rightism
+    
+    # increment wave counter
+    i <- i + 1
+  } 
+  
+  # bind rows from list
+  combined <- bind_rows(mean_gap_results)
+  return(combined)
+}
+
+gender_gaps_no_age <- calculate_gender_gap_no_age(processed_waves)
+
+print(gender_gaps_no_age)
+
+# Generate visualizations for the waves
+
+# Create visualization for gender gaps by age across waves
+create_gender_scores_by_wave <- function(gender_gaps_data) {
+  
+  # Set up colors and styling consistent with project theme
+  gender_colors <- c(female = "#E76F51", male = "#2A9D8F")
+  
+  # Create age group labels for better readability
+  age_labels <- c("18_TO_24" = "18-24", "25_TO_34" = "25-34", "35_TO_44" = "35-44",
+                  "45_TO_54" = "45-54", "55_TO_64" = "55-64", "65_TO_74" = "65-74", 
+                  "75_PLUS" = "75+")
+  
+  # Social conservatism plot
+  social_plot <- ggplot(gender_gaps_data, 
+                       aes(x = wave, y = social_conservatism_mean, 
+                           color = gender, group = interaction(age, gender))) +
+    geom_line(size = 1.2, alpha = 0.8) +
+    geom_point(size = 3, alpha = 0.9) +
+    geom_errorbar(aes(ymin = social_conservatism_mean - 1.96*se_soc,
+                     ymax = social_conservatism_mean + 1.96*se_soc),
+                 width = 0.1, alpha = 0.7) +
+    facet_wrap(~age, labeller = labeller(age = age_labels), ncol = 4) +
+    scale_color_manual(values = gender_colors, name = "Gender") +
+    scale_x_continuous(breaks = sort(unique(gender_gaps_data$wave)),
+                      labels = paste("Wave", sort(unique(gender_gaps_data$wave)))) +
+    labs(title = "Social Conservatism by Gender and Age Across Waves",
+         x = "Survey Wave", 
+         y = "Mean Social Conservatism Score",
+         caption = "Error bars show 95% confidence intervals") +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "bottom",
+          plot.title = element_text(face = "bold", size = 14),
+          strip.text = element_text(face = "bold"),
+          axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  # Economic rightism plot  
+  economic_plot <- ggplot(gender_gaps_data, 
+                         aes(x = wave, y = economic_rightism_mean, 
+                             color = gender, group = interaction(age, gender))) +
+    geom_line(linewidth = 1.2, alpha = 0.8) +
+    geom_point(size = 3, alpha = 0.9) +
+    geom_errorbar(aes(ymin = economic_rightism_mean - 1.96*se_econ,
+                     ymax = economic_rightism_mean + 1.96*se_econ),
+                 width = 0.1, alpha = 0.7) +
+    facet_wrap(~age, labeller = labeller(age = age_labels), ncol = 4) +
+    scale_color_manual(values = gender_colors, name = "Gender") +
+    scale_x_continuous(breaks = sort(unique(gender_gaps_data$wave)),
+                      labels = paste("Wave", sort(unique(gender_gaps_data$wave)))) +
+    labs(title = "Economic Rightism by Gender and Age Across Waves",
+         x = "Survey Wave", 
+         y = "Mean Economic Rightism Score",
+         caption = "Error bars show 95% confidence intervals") +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "bottom",
+          plot.title = element_text(face = "bold", size = 14),
+          strip.text = element_text(face = "bold"),
+          axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  return(list(social = social_plot, economic = economic_plot))
+}
+
+# Generate and display the plots
+wave_plots <- create_gender_scores_by_wave(gender_gaps_no_age)
+
+# Display social conservatism trends
+wave_plots$social
+
+# Display economic rightism trends  
+wave_plots$economic
+
+```
+
+#### Gender Gap Trends by Age Group Over Time
+
+```{r}
+
+# Calculate gender gaps (male - female) for each age group across waves
+calculate_gender_gaps_by_age <- function(gender_gaps_data) {
+  
+  # Calculate gaps for each ideology measure
+  gap_data <- gender_gaps_data %>%
+    select(wave, age, gender, social_conservatism_mean, economic_rightism_mean, 
+           se_soc, se_econ) %>%
+    pivot_wider(names_from = gender, 
+                values_from = c(social_conservatism_mean, economic_rightism_mean, se_soc, se_econ),
+                names_sep = "_") %>%
+    mutate(
+      # Calculate gender gaps (male - female)
+      social_gap = social_conservatism_mean_male - social_conservatism_mean_female,
+      economic_gap = economic_rightism_mean_male - economic_rightism_mean_female,
+      # Calculate combined standard errors for gaps
+      social_gap_se = sqrt(se_soc_male^2 + se_soc_female^2),
+      economic_gap_se = sqrt(se_econ_male^2 + se_econ_female^2)
+    ) %>%
+    select(wave, age, social_gap, economic_gap, social_gap_se, economic_gap_se)
+  
+  return(gap_data)
+}
+
+# Create visualization for gender gaps across waves
+create_gender_gap_trends <- function(gap_data) {
+  
+  # Set up colors for age groups (similar to existing approach)
+  age_colors <- c("#E76F51", "#F4A261", "#E9C46A", "#2A9D8F", "#264653", "#1D3557", "#8B4B8C")
+  names(age_colors) <- c("18_TO_24", "25_TO_34", "35_TO_44", "45_TO_54", "55_TO_64", "65_TO_74", "75_PLUS")
+  
+  # Create age group labels for better readability
+  age_labels <- c("18_TO_24" = "18-24", "25_TO_34" = "25-34", "35_TO_44" = "35-44",
+                  "45_TO_54" = "45-54", "55_TO_64" = "55-64", "65_TO_74" = "65-74", 
+                  "75_PLUS" = "75+")
+  
+  # Prepare data for plotting
+  plot_data <- gap_data %>%
+    mutate(age_label = age_labels[age])
+  
+  # Social conservatism gap plot
+  social_gap_plot <- ggplot(plot_data, aes(x = wave, y = social_gap, color = age, group = age)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "grey50", alpha = 0.7) +
+    geom_line(size = 1.5, alpha = 0.8) +
+    geom_point(size = 4, alpha = 0.9) +
+    geom_errorbar(aes(ymin = social_gap - 1.96*social_gap_se, 
+                     ymax = social_gap + 1.96*social_gap_se),
+                 width = 0.1, alpha = 0.7) +
+    scale_color_manual(values = age_colors, name = "Age Group",
+                      labels = age_labels) +
+    scale_x_continuous(breaks = sort(unique(plot_data$wave)),
+                      labels = paste("Wave", sort(unique(plot_data$wave)))) +
+    labs(title = "Social Conservatism Gender Gap by Age Across Waves",
+         subtitle = "Positive values indicate men more socially conservative than women",
+         x = "Survey Wave", 
+         y = "Gender Gap (Male - Female)",
+         caption = "Error bars show 95% confidence intervals") +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "bottom",
+          plot.title = element_text(face = "bold", size = 14),
+          plot.subtitle = element_text(size = 11, color = "grey40"),
+          axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  # Economic rightism gap plot  
+  economic_gap_plot <- ggplot(plot_data, aes(x = wave, y = economic_gap, color = age, group = age)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "grey50", alpha = 0.7) +
+    geom_line(size = 1.5, alpha = 0.8) +
+    geom_point(size = 4, alpha = 0.9) +
+    geom_errorbar(aes(ymin = economic_gap - 1.96*economic_gap_se, 
+                     ymax = economic_gap + 1.96*economic_gap_se),
+                 width = 0.1, alpha = 0.7) +
+    scale_color_manual(values = age_colors, name = "Age Group",
+                      labels = age_labels) +
+    scale_x_continuous(breaks = sort(unique(plot_data$wave)),
+                      labels = paste("Wave", sort(unique(plot_data$wave)))) +
+    labs(title = "Economic Rightism Gender Gap by Age Across Waves",
+         subtitle = "Positive values indicate men more economically right-wing than women",
+         x = "Survey Wave", 
+         y = "Gender Gap (Male - Female)",
+         caption = "Error bars show 95% confidence intervals") +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "bottom",
+          plot.title = element_text(face = "bold", size = 14),
+          plot.subtitle = element_text(size = 11, color = "grey40"),
+          axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  return(list(social = social_gap_plot, economic = economic_gap_plot))
+}
+
+# Calculate gender gaps by age
+gender_gaps_by_age <- calculate_gender_gaps_by_age(gender_gaps_no_age)
+
+# Generate gap trend plots
+gap_trend_plots <- create_gender_gap_trends(gender_gaps_by_age)
+
+# Display social conservatism gender gap trends
+gap_trend_plots$social
+
+# Display economic rightism gender gap trends
+gap_trend_plots$economic
+
+```
+
+#### Model examiniation of key demographic effects
+
+This framework can be used to signal shifts in the effects of key demographic predictors over time. Signals unique effects observed in the previous survey waves that should be examined further as possible early-signs of growing trends around changing attitudinal patterns.  
+
+```{r}
+# Fit models for all waves combined
+
+fit_models_for_each_wave <- function(processed_waves) {
+  i <- 1
+  model_results <- list()
+  for (wave in processed_waves){
+    
+    survey_design_full <- svydesign(
+  ids = ~1, 
+  weights = ~wt,
+  data = wave
+)
+    model_social <- svyglm(
+  social_conservatism ~ gender * age + gender * education + age * education + 
+                       gender * region + ethnicity + household + socgrad + 
+                       marital + religion,
+  design = survey_design_full,
+  family = gaussian()
+)
+    
+  model_economic <- svyglm(
+  economic_rightism ~ gender * age + gender * education + age * education + 
+                       gender * region + ethnicity + household + socgrad + 
+                       marital + religion,
+  design = survey_design_full,
+  family = gaussian()
+)  
+  model_results[[i]] <- list(social = model_social, economic = model_economic)
+    i <- i + 1
+    
+    
+  }
+  return(model_results)
+}
+
+## Model results for all previous waves except last
+all_waves_minus_last <- bind_rows(processed_waves[-length(processed_waves)])
+survey_design_full <- svydesign(
+  ids = ~1, 
+  weights = ~wt,
+  data = all_waves_minus_last
+)
+
+model_social <- svyglm(
+  social_conservatism ~ gender * age + gender * education + age * education + 
+                       gender * region + ethnicity + household + socgrad + 
+                       marital + religion,
+  design = survey_design_full,
+  family = gaussian())
+
+model_economic <- svyglm(
+  economic_rightism ~ gender * age + gender * education + age * education + 
+                       gender * region + ethnicity + household + socgrad + 
+                       marital + religion,
+  design = survey_design_full,
+  family = gaussian())  
+
+### Models results for all waves including last
+all_survey_wave_models <- fit_models_for_each_wave(processed_waves)
+
+# summary(all_survey_wave_models[[1]][[1]])  # Social model for wave 1
+
+
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+library(broom)
+
+# Function to extract key coefficients with confidence intervals
+extract_key_coefficients <- function(model, model_name, outcome_type) {
+  
+  # Get model summary with confidence intervals
+  coef_summary <- summary(model)$coefficients
+  confint_results <- confint(model)
+  
+  # Key theoretically significant coefficients based on your model structure
+  key_coeffs <- c(
+    "gendermale",                           # Main gender effect
+    "age25_TO_34",                          # Key young age groups
+    "age35_TO_44", 
+    "gendermale:age25_TO_34",              # Gender-age interactions (core to the research)
+    "gendermale:age35_TO_44",
+    "gendermale:age45_TO_54",
+    "gendermale:age55_TO_64",
+    "gendermale:educationlow",             # Gender-education interaction
+    "gendermale:regionGreater London",     # Gender-region interactions (urban effects)
+    "gendermale:regionScotland",
+    "gendermale:regionWest Midlands",
+    "religionnone",                        # Key social attitude predictor
+    "ethnicitywhite",                      # Ethnicity effects
+    "ethnicitymixed"
+  )
+  
+  # Filter for available coefficients
+  available_coeffs <- intersect(key_coeffs, rownames(coef_summary))
+  
+  # Only proceed if we have coefficients
+  if (length(available_coeffs) == 0) {
+    warning("No key coefficients found in model")
+    return(data.frame())
+  }
+  
+  # Extract coefficient data
+  coeff_data <- data.frame(
+    coefficient = available_coeffs,
+    estimate = coef_summary[available_coeffs, "Estimate"],
+    std_error = coef_summary[available_coeffs, "Std. Error"],
+    p_value = coef_summary[available_coeffs, "Pr(>|t|)"],
+    ci_lower = confint_results[available_coeffs, 1],
+    ci_upper = confint_results[available_coeffs, 2],
+    model = model_name,
+    outcome = outcome_type,
+    stringsAsFactors = FALSE
+  )
+  
+  return(coeff_data)
+}
+
+# Extract coefficients for comparison models
+# Latest wave models (highest index)
+latest_wave_idx <- length(all_survey_wave_models)
+latest_social_coeffs <- extract_key_coefficients(
+  all_survey_wave_models[[latest_wave_idx]]$social, 
+  "Latest Wave", 
+  "Social Conservatism"
+)
+latest_economic_coeffs <- extract_key_coefficients(
+  all_survey_wave_models[[latest_wave_idx]]$economic, 
+  "Latest Wave", 
+  "Economic Rightism"
+)
+
+# All previous waves models
+all_previous_social_coeffs <- extract_key_coefficients(
+  model_social, 
+  "All Previous Waves", 
+  "Social Conservatism"
+)
+all_previous_economic_coeffs <- extract_key_coefficients(
+  model_economic, 
+  "All Previous Waves", 
+  "Economic Rightism"
+)
+
+# Combine all coefficient data
+all_coeffs <- bind_rows(
+  latest_social_coeffs,
+  latest_economic_coeffs,
+  all_previous_social_coeffs,
+  all_previous_economic_coeffs
+)
+
+# Create coefficient labels for better readability
+all_coeffs$coeff_label <- case_when(
+  all_coeffs$coefficient == "gendermale" ~ "Male (vs Female)",
+  all_coeffs$coefficient == "age25_TO_34" ~ "Age 25-34",
+  all_coeffs$coefficient == "age35_TO_44" ~ "Age 35-44", 
+  all_coeffs$coefficient == "gendermale:age25_TO_34" ~ "Male × Age 25-34",
+  all_coeffs$coefficient == "gendermale:age35_TO_44" ~ "Male × Age 35-44",
+  all_coeffs$coefficient == "gendermale:age45_TO_54" ~ "Male × Age 45-54",
+  all_coeffs$coefficient == "gendermale:age55_TO_64" ~ "Male × Age 55-64",
+  all_coeffs$coefficient == "gendermale:educationlow" ~ "Male × Lower Education",
+  all_coeffs$coefficient == "gendermale:regionGreater London" ~ "Male × London",
+  all_coeffs$coefficient == "gendermale:regionScotland" ~ "Male × Scotland",
+  all_coeffs$coefficient == "gendermale:regionWest Midlands" ~ "Male × West Midlands",
+  all_coeffs$coefficient == "religionnone" ~ "No Religion",
+  all_coeffs$coefficient == "ethnicitywhite" ~ "White Ethnicity",
+  all_coeffs$coefficient == "ethnicitymixed" ~ "Mixed Ethnicity",
+  TRUE ~ all_coeffs$coefficient
+)
+
+# Add significance indicators
+all_coeffs$significance <- case_when(
+  all_coeffs$p_value < 0.001 ~ "***",
+  all_coeffs$p_value < 0.01 ~ "**", 
+  all_coeffs$p_value < 0.05 ~ "*",
+  all_coeffs$p_value < 0.1 ~ ".",
+  TRUE ~ ""
+)
+
+# Create the forest plot function
+create_forest_plot <- function(outcome_filter) {
+  
+  plot_data <- all_coeffs %>%
+    filter(outcome == outcome_filter) %>%
+    mutate(
+      model_outcome = paste(model, outcome, sep = " - "),
+      coeff_label = factor(coeff_label, levels = rev(unique(coeff_label)))
+    )
+  
+  if (nrow(plot_data) == 0) {
+    warning(paste("No data available for", outcome_filter))
+    return(ggplot() + labs(title = paste("No data for", outcome_filter)))
+  }
+  
+  ggplot(plot_data, aes(x = estimate, y = coeff_label, color = model)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50", alpha = 0.7) +
+    geom_errorbarh(aes(xmin = ci_lower, xmax = ci_upper), 
+                   height = 0.3, position = position_dodge(width = 0.5)) +
+    geom_point(size = 3, position = position_dodge(width = 0.5)) +
+    geom_text(aes(label = significance), 
+              position = position_dodge(width = 0.5),
+              hjust = -0.5, size = 4, show.legend = FALSE) +
+    scale_color_manual(values = c("Latest Wave" = "#e31a1c", 
+                                 "All Previous Waves" = "#1f78b4")) +
+    labs(
+      title = paste("Key Coefficients Comparison:", outcome_filter),
+      subtitle = "Latest Wave vs All Previous Waves Models",
+      x = "Coefficient Estimate (95% CI)",
+      y = "Model Terms",
+      color = "Model",
+      #caption = "Significance: *** p<0.001, ** p<0.01, * p<0.05, . p<0.1\nPositive values indicate more conservative/rightist attitudes"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      axis.title = element_text(size = 11),
+      axis.text = element_text(size = 10),
+      legend.title = element_text(size = 11),
+      legend.text = element_text(size = 10),
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_line(color = "gray90", size = 0.5),
+      plot.caption = element_text(size = 9, color = "gray60")
+    ) +
+    guides(color = guide_legend(override.aes = list(size = 4)))
+}
+
+# Create forest plots for both outcomes
+social_forest_plot <- create_forest_plot("Social Conservatism")
+economic_forest_plot <- create_forest_plot("Economic Rightism")
+
+# Display the plots
+print("Social Conservatism Forest Plot:")
+print(social_forest_plot)
+
+print("\nEconomic Rightism Forest Plot:")
+print(economic_forest_plot)
+
+# Create a summary table
+summary_table <- all_coeffs %>%
+  select(outcome, model, coeff_label, estimate, ci_lower, ci_upper, p_value, significance) %>%
+  mutate(
+    ci_formatted = paste0("[", round(ci_lower, 3), ", ", round(ci_upper, 3), "]"),
+    estimate_formatted = paste0(round(estimate, 3), significance)
+  ) %>%
+  select(outcome, model, coeff_label, estimate_formatted, ci_formatted, p_value) %>%
+  arrange(outcome, coeff_label, model)
+
+print(summary_table)
+
+```
+
+#### Issue Stance Trends Over Survey Waves
+
+```{r}
+
+# Calculate issue stances over waves for the 4 key issues from slides visuals
+calculate_issue_trends <- function(processed_waves) {
+  
+  # Define the 4 key issues examined in slides visuals
+  target_issues <- c("soc_censor", "soc_respect", "econ_onelaw", "soc_schools")
+  
+  # Calculate weighted means for each issue across waves
+  issue_results <- list()
+  
+  for (wave_idx in seq_along(processed_waves)) {
+    wave_data <- processed_waves[[wave_idx]]
+    survey_design <- svydesign(ids = ~1, data = wave_data, weights = ~wt)
+    
+    # Calculate means by gender for each target issue
+    wave_results <- map_dfr(target_issues, function(issue) {
+      
+      # Overall means by gender
+      gender_means <- svyby(
+        as.formula(paste("~", issue)),
+        ~gender,
+        design = survey_design,
+        FUN = svymean,
+        na.rm = TRUE
+      ) %>%
+        as.data.frame() %>%
+        mutate(
+          issue = issue,
+          wave = wave_idx,
+          issue_mean = .data[[issue]],
+          issue_se = se
+        ) %>%
+        select(wave, issue, gender, issue_mean, issue_se)
+      
+      return(gender_means)
+    })
+    
+    issue_results[[wave_idx]] <- wave_results
+  }
+  
+  # Combine all waves
+  combined_issues <- bind_rows(issue_results)
+  
+  return(combined_issues)
+}
+
+# Create visualization for issue stance trends
+create_issue_stance_plots <- function(issue_data) {
+  
+  # Set up issue labels and colors consistent with project theme
+  issue_labels <- c(
+    "soc_censor" = "Censorship for\nMoral Standards",
+    "soc_respect" = "Young People Need\nMore Respect",
+    "econ_onelaw" = "One Law for Rich,\nAnother for Poor",
+    "soc_schools" = "Schools Should Teach\nChildren to Obey Authority"
+  )
+  
+  # Gender colors consistent with project
+  gender_colors <- c(female = "#E76F51", male = "#2A9D8F")
+  
+  # Prepare data with readable labels
+  plot_data <- issue_data %>%
+    mutate(
+      issue_label = issue_labels[issue],
+      issue_domain = if_else(str_starts(issue, "soc_"), "Social Issues", "Economic Issues")
+    )
+  
+  # Create individual plots for each issue
+  issue_plots <- map(names(issue_labels), function(target_issue) {
+    
+    issue_subset <- plot_data %>%
+      filter(issue == target_issue)
+    
+    ggplot(issue_subset, aes(x = wave, y = issue_mean, color = gender, group = gender)) +
+      geom_line(size = 1.5, alpha = 0.8) +
+      geom_point(size = 4, alpha = 0.9) +
+      geom_errorbar(aes(ymin = issue_mean - 1.96*issue_se, 
+                       ymax = issue_mean + 1.96*issue_se),
+                   width = 0.1, alpha = 0.7) +
+      scale_color_manual(values = gender_colors, name = "Gender") +
+      scale_x_continuous(breaks = sort(unique(plot_data$wave)),
+                        labels = paste("Wave", sort(unique(plot_data$wave)))) +
+      scale_y_continuous(limits = c(-1, 1), 
+                        breaks = seq(-1, 1, 0.5),
+                        labels = c("Strongly\nDisagree", "Disagree", "Neutral", 
+                                 "Agree", "Strongly\nAgree")) +
+      labs(title = issue_labels[target_issue],
+           x = "Survey Wave", 
+           y = "Mean Agreement",
+           caption = "Error bars show 95% confidence intervals") +
+      theme_minimal(base_size = 12) +
+      theme(legend.position = "bottom",
+            plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+            axis.text.x = element_text(angle = 45, hjust = 1),
+            axis.text.y = element_text(size = 10))
+  })
+  
+  names(issue_plots) <- names(issue_labels)
+  
+  # Create combined plot showing all issues
+  combined_plot <- ggplot(plot_data, aes(x = wave, y = issue_mean, color = gender, group = gender)) +
+    geom_line(size = 1.2, alpha = 0.8) +
+    geom_point(size = 3, alpha = 0.9) +
+    geom_errorbar(aes(ymin = issue_mean - 1.96*issue_se, 
+                     ymax = issue_mean + 1.96*issue_se),
+                 width = 0.1, alpha = 0.6) +
+    facet_wrap(~issue_label, scales = "free_y", ncol = 2) +
+    scale_color_manual(values = gender_colors, name = "Gender") +
+    scale_x_continuous(breaks = sort(unique(plot_data$wave)),
+                      labels = paste("Wave", sort(unique(plot_data$wave)))) +
+    scale_y_continuous(breaks = seq(-1, 1, 0.5),
+                      labels = c("Strongly\nDisagree", "Disagree", "Neutral", 
+                               "Agree", "Strongly\nAgree")) +
+    labs(title = "Issue Stance Trends by Gender Across Survey Waves",
+         subtitle = "Key political attitudes tracked over time",
+         x = "Survey Wave", 
+         y = "Mean Agreement Level",
+         caption = "Error bars show 95% confidence intervals") +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "bottom",
+          plot.title = element_text(face = "bold", size = 16),
+          plot.subtitle = element_text(size = 12, color = "grey40"),
+          strip.text = element_text(face = "bold", size = 11),
+          axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  return(list(
+    individual = issue_plots,
+    combined = combined_plot
+  ))
+}
+
+# Calculate issue trends across waves
+issue_trends <- calculate_issue_trends(processed_waves)
+
+# Generate issue stance plots
+issue_plots <- create_issue_stance_plots(issue_trends)
+
+# Display the combined plot showing all 4 key issues
+issue_plots$combined
+
+# Display individual plots for detailed view
+issue_plots$individual$soc_censor
+issue_plots$individual$soc_respect  
+issue_plots$individual$econ_onelaw
+issue_plots$individual$soc_schools
+
+```
+
+Above issue trends can be extended for age-group analysis.
+
+#### Statistical Significance Testing for Wave-to-Wave Changes
+
+Tests whether specific population groups experience a statistically significant difference from the current survey wave compared to all previous. Utilizes survey-based t-tests for statistical inference.
+
+In future, could be extended to region and other demographic groupings. Currently focused on the contextually significant groups. 
+
+```{r}
+
+# Function to test statistical significance using survey t-tests
+test_wave_significance <- function(processed_waves) {
+  
+  # Key metrics to test
+  metrics_to_test <- c("social_conservatism", "economic_rightism")
+  
+  # Store all significance tests
+  significance_results <- list()
+  
+  # Test each wave against all previous waves combined (cumulative approach)
+  for (current_wave in 2:length(processed_waves)) {
+    
+    # Current wave data
+    current_data <- processed_waves[[current_wave]]
+    
+    # All previous waves combined for maximum power
+    previous_data <- bind_rows(processed_waves[1:(current_wave-1)]) %>%
+      mutate(wave_group = "previous")
+    
+    # Add wave group identifier
+    current_data <- current_data %>% mutate(wave_group = "current")
+    
+    # Combine for t-test
+    combined_data <- bind_rows(previous_data, current_data)
+    combined_design <- svydesign(ids = ~1, data = combined_data, weights = ~wt)
+    
+    # Test each metric
+    wave_tests <- map_dfr(metrics_to_test, function(metric) {
+      
+      # Test overall population change
+      overall_test <- tryCatch({
+        ttest_result <- svyttest(
+          as.formula(paste(metric, "~ wave_group")), 
+          design = combined_design
+        )
+        
+        # Calculate means for each group
+        means_by_group <- svyby(
+          as.formula(paste("~", metric)),
+          ~wave_group,
+          design = combined_design,
+          FUN = svymean,
+          na.rm = TRUE
+        )
+        
+        current_mean <- means_by_group[means_by_group$wave_group == "current", metric]
+        previous_mean <- means_by_group[means_by_group$wave_group == "previous", metric]
+        
+        data.frame(
+          comparison = "Overall Population",
+          metric = metric,
+          wave_from = paste("Waves 1-", current_wave-1),
+          wave_to = paste("Wave", current_wave),
+          difference = current_mean - previous_mean,
+          t_statistic = ttest_result$statistic,
+          p_value = ttest_result$p.value,
+          significant = ttest_result$p.value < 0.05,
+          stringsAsFactors = FALSE
+        )
+      }, error = function(e) {
+        data.frame(
+          comparison = "Overall Population",
+          metric = metric,
+          wave_from = paste("Waves 1-", current_wave-1),
+          wave_to = paste("Wave", current_wave),
+          difference = NA,
+          t_statistic = NA,
+          p_value = NA,
+          significant = FALSE,
+          stringsAsFactors = FALSE
+        )
+      })
+      
+      # Test gender-specific changes
+      gender_tests <- map_dfr(c("male", "female"), function(target_gender) {
+        tryCatch({
+          # Filter for specific gender
+          gender_data <- combined_data %>% filter(gender == target_gender)
+          gender_design <- svydesign(ids = ~1, data = gender_data, weights = ~wt)
+          
+          ttest_result <- svyttest(
+            as.formula(paste(metric, "~ wave_group")), 
+            design = gender_design
+          )
+          
+          # Calculate means for this gender
+          means_by_group <- svyby(
+            as.formula(paste("~", metric)),
+            ~wave_group,
+            design = gender_design,
+            FUN = svymean,
+            na.rm = TRUE
+          )
+          
+          current_mean <- means_by_group[means_by_group$wave_group == "current", metric]
+          previous_mean <- means_by_group[means_by_group$wave_group == "previous", metric]
+          
+          data.frame(
+            comparison = paste(str_to_title(target_gender), "Only"),
+            metric = metric,
+            wave_from = paste("Waves 1-", current_wave-1),
+            wave_to = paste("Wave", current_wave),
+            difference = current_mean - previous_mean,
+            t_statistic = ttest_result$statistic,
+            p_value = ttest_result$p.value,
+            significant = ttest_result$p.value < 0.05,
+            stringsAsFactors = FALSE
+          )
+        }, error = function(e) {
+          data.frame(
+            comparison = paste(str_to_title(target_gender), "Only"),
+            metric = metric,
+            wave_from = paste("Waves 1-", current_wave-1),
+            wave_to = paste("Wave", current_wave),
+            difference = NA,
+            t_statistic = NA,
+            p_value = NA,
+            significant = FALSE,
+            stringsAsFactors = FALSE
+          )
+        })
+      })
+      
+      # Test change in gender gap using interaction approach
+      gap_test <- tryCatch({
+        # Create interaction between gender and wave_group
+        combined_data_for_gap <- combined_data %>%
+          mutate(
+            gender_wave = interaction(gender, wave_group),
+            gender_numeric = if_else(gender == "male", 1, 0),
+            wave_numeric = if_else(wave_group == "current", 1, 0)
+          )
+        
+        # Use survey GLM to test interaction
+        gap_design <- svydesign(ids = ~1, data = combined_data_for_gap, weights = ~wt)
+        
+        gap_model <- svyglm(
+          as.formula(paste(metric, "~ gender_numeric * wave_numeric")),
+          design = gap_design
+        )
+        
+        # Extract interaction coefficient (this tests if gender gap changed)
+        interaction_coef <- summary(gap_model)$coefficients["gender_numeric:wave_numeric", ]
+        
+        data.frame(
+          comparison = "Gender Gap Change",
+          metric = metric,
+          wave_from = paste("Waves 1-", current_wave-1),
+          wave_to = paste("Wave", current_wave),
+          difference = interaction_coef["Estimate"],
+          t_statistic = interaction_coef["t value"],
+          p_value = interaction_coef["Pr(>|t|)"],
+          significant = interaction_coef["Pr(>|t|)"] < 0.05,
+          stringsAsFactors = FALSE
+        )
+      }, error = function(e) {
+        data.frame(
+          comparison = "Gender Gap Change",
+          metric = metric,
+          wave_from = paste("Waves 1-", current_wave-1),
+          wave_to = paste("Wave", current_wave),
+          difference = NA,
+          t_statistic = NA,
+          p_value = NA,
+          significant = FALSE,
+          stringsAsFactors = FALSE
+        )
+      })
+      
+      # Test age-specific changes: Young (18-34) vs Older (35+)
+      age_tests <- map_dfr(c("young", "older"), function(age_group) {
+        tryCatch({
+          # Create age groups
+          age_data <- combined_data %>%
+            mutate(
+              age_broad = case_when(
+                age %in% c("18_TO_24", "25_TO_34") ~ "young",
+                age %in% c("35_TO_44", "45_TO_54", "55_TO_64", "65_TO_74", "75_PLUS") ~ "older"
+              )
+            ) %>%
+            filter(age_broad == age_group, !is.na(age_broad))
+          
+          age_design <- svydesign(ids = ~1, data = age_data, weights = ~wt)
+          
+          ttest_result <- svyttest(
+            as.formula(paste(metric, "~ wave_group")), 
+            design = age_design
+          )
+          
+          # Calculate means for this age group
+          means_by_group <- svyby(
+            as.formula(paste("~", metric)),
+            ~wave_group,
+            design = age_design,
+            FUN = svymean,
+            na.rm = TRUE
+          )
+          
+          current_mean <- means_by_group[means_by_group$wave_group == "current", metric]
+          previous_mean <- means_by_group[means_by_group$wave_group == "previous", metric]
+          
+          data.frame(
+            comparison = paste(str_to_title(age_group), "Ages Only"),
+            metric = metric,
+            wave_from = paste("Waves 1-", current_wave-1),
+            wave_to = paste("Wave", current_wave),
+            difference = current_mean - previous_mean,
+            t_statistic = ttest_result$statistic,
+            p_value = ttest_result$p.value,
+            significant = ttest_result$p.value < 0.05,
+            stringsAsFactors = FALSE
+          )
+        }, error = function(e) {
+          data.frame(
+            comparison = paste(str_to_title(age_group), "Ages Only"),
+            metric = metric,
+            wave_from = paste("Waves 1-", current_wave-1),
+            wave_to = paste("Wave", current_wave),
+            difference = NA,
+            t_statistic = NA,
+            p_value = NA,
+            significant = FALSE,
+            stringsAsFactors = FALSE
+          )
+        })
+      })
+      
+      # Test young gender gap vs older gender gap changes
+      age_gender_gap_tests <- map_dfr(c("young", "older"), function(age_group) {
+        tryCatch({
+          # Create age groups and test gender gap changes within each
+          age_data <- combined_data %>%
+            mutate(
+              age_broad = case_when(
+                age %in% c("18_TO_24", "25_TO_34") ~ "young",
+                age %in% c("35_TO_44", "45_TO_54", "55_TO_64", "65_TO_74", "75_PLUS") ~ "older"
+              ),
+              gender_numeric = if_else(gender == "male", 1, 0),
+              wave_numeric = if_else(wave_group == "current", 1, 0)
+            ) %>%
+            filter(age_broad == age_group, !is.na(age_broad))
+          
+          age_design <- svydesign(ids = ~1, data = age_data, weights = ~wt)
+          
+          gap_model <- svyglm(
+            as.formula(paste(metric, "~ gender_numeric * wave_numeric")),
+            design = age_design
+          )
+          
+          # Extract interaction coefficient
+          interaction_coef <- summary(gap_model)$coefficients["gender_numeric:wave_numeric", ]
+          
+          data.frame(
+            comparison = paste(str_to_title(age_group), "Gender Gap Change"),
+            metric = metric,
+            wave_from = paste("Waves 1-", current_wave-1),
+            wave_to = paste("Wave", current_wave),
+            difference = interaction_coef["Estimate"],
+            t_statistic = interaction_coef["t value"],
+            p_value = interaction_coef["Pr(>|t|)"],
+            significant = interaction_coef["Pr(>|t|)"] < 0.05,
+            stringsAsFactors = FALSE
+          )
+        }, error = function(e) {
+          data.frame(
+            comparison = paste(str_to_title(age_group), "Gender Gap Change"),
+            metric = metric,
+            wave_from = paste("Waves 1-", current_wave-1),
+            wave_to = paste("Wave", current_wave),
+            difference = NA,
+            t_statistic = NA,
+            p_value = NA,
+            significant = FALSE,
+            stringsAsFactors = FALSE
+          )
+        })
+      })
+      
+      # Combine all tests for this metric
+      bind_rows(overall_test, gender_tests, gap_test, age_tests, age_gender_gap_tests)
+    })
+    
+    significance_results[[current_wave]] <- wave_tests
+  }
+  
+  # Combine all waves
+  all_results <- bind_rows(significance_results) %>%
+    mutate(
+      wave_comparison = paste(wave_from, "vs", wave_to),
+      metric_label = case_when(
+        metric == "social_conservatism" ~ "Social Conservatism",
+        metric == "economic_rightism" ~ "Economic Rightism"
+      ),
+      significance_level = case_when(
+        is.na(p_value) ~ "Not Tested",
+        p_value < 0.001 ~ "***",
+        p_value < 0.01 ~ "**", 
+        p_value < 0.05 ~ "*",
+        TRUE ~ ""
+      ),
+      alert_level = case_when(
+        significant & abs(difference) > 0.05 ~ "HIGH",
+        significant & abs(difference) > 0.02 ~ "MEDIUM",
+        significant ~ "LOW",
+        TRUE ~ "NONE"
+      )
+    )
+  
+  return(all_results)
+}
+
+
+# Run significance testing
+wave_significance <- test_wave_significance(processed_waves)
+
+# Display results
+print(paste("Statistical Significance Testing Complete"))
+print(paste("Total tests performed:", nrow(wave_significance)))
+print(paste("Significant changes detected:", sum(wave_significance$significant, na.rm = TRUE)))
+
+# Display significance test results table
+print("SIGNIFICANCE TEST RESULTS:")
+print(wave_significance %>% 
+      select(wave_comparison, metric_label, comparison, difference, p_value, significance_level, alert_level) %>%
+      arrange(wave_comparison, metric_label, comparison))
+
+```
+
+
+#### Future extensions
+
+R-shiny based dashboard to allow interactive exploration of trends, gaps, and significance testing results over time, splitting by demographics and outcomes.
+
+
+
