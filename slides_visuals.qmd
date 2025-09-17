@@ -30,6 +30,25 @@ source('scripts/setup_full.R')
 
 # Set colors for age bands
 
+# Set custom theme 
+
+theme_minimal_blue <- function() {
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "#e6f3ff", size = 0.3),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "#2c5282"),
+    axis.title = element_text(color = "#2c5282", face = "bold"),
+    plot.title = element_text(color = "#1a365d", face = "bold", size = 18),
+    plot.subtitle = element_text(color = "#4a5568"),
+    legend.title = element_text(color = "#2c5282", face = "bold"),
+    legend.text = element_text(color = "#4a5568"),
+    base_size = 16, base_family = "sans"
+  )
+}
+
+gender_colors <- c(female="#8B5A96", male="#2A9D8F")
+
 
 ```
 
@@ -71,7 +90,6 @@ ci_mult   <- 1.96
 bar_width <- 5
 dodge_w   <- 0.6
 err_h     <- 0.001
-gender_colors <- c(female="#E76F51", male="#2A9D8F")
 x_min <- 0.20; x_max <- 0.80
 
 
@@ -108,7 +126,7 @@ plot_df <- means_conservatism_rightism %>%
 # --- build faceted data ---
 plot_df_faceted <- plot_df %>%
   mutate(
-    panel = if_else(mean_signed < 0, "Economic rightism", "Social Conservatism"),
+    panel = if_else(mean_signed < 0, "Economically right", "Social Conservatism"),
     x_abs = abs(mean_signed),
     age   = factor(age, levels = age_levels_desc)  # set order ONCE
   ) %>%
@@ -139,12 +157,15 @@ ggplot(plot_df_faceted) +
   scale_y_continuous(breaks = y_breaks, labels = age_labels_pretty) +
   labs(#title = "Economic rightism vs Social Conservatism by Age",
        x = NULL, y = NULL) +
-  theme_minimal(base_size = 12, base_family = "sans") +
+  theme_minimal_blue() +
   theme(legend.position = "bottom",
         panel.grid.major.y = element_blank(),
-        strip.text = element_text(face = "bold"),
+        strip.text = element_text(face = "bold", size = 18),
         axis.text.y = element_text(family = "sans", face = "plain", size = 12),
+        legend.text = element_text(size = 16),      # Gender label size
         axis.title.y = element_text(family = "sans", face = "bold"))
+
+
 
 ```
 
@@ -176,15 +197,14 @@ vote_proportions_survey <- svyby(
 print("Vote shares by age, gender, and party (survey-weighted):")
 print(vote_proportions_survey)
 
-# Filter for the four main parties and create visualization
+# Filter for the three main parties and create visualization
 major_parties_survey <- vote_proportions_survey %>%
-  filter(party %in% c("con", "rfm", "lab", "ldm")) %>%
+  filter(party %in% c("con", "rfm", "lab")) %>%
   mutate(
     party_label = case_when(
       party == "con" ~ "Conservative",
       party == "rfm" ~ "Reform",
-      party == "lab" ~ "Labour", 
-      party == "ldm" ~ "Liberal Democrat"
+      party == "lab" ~ "Labour"
     ),
     # Order age groups chronologically (youngest to oldest, left to right)
     age = factor(age, levels = c("18_TO_24", "25_TO_34", "35_TO_44",
@@ -192,35 +212,100 @@ major_parties_survey <- vote_proportions_survey %>%
   )
 
 # Use same styling settings from previous chunk
-gender_colors <- c(female="#E76F51", male="#2A9D8F")
 dodge_w <- 0.6
 pd <- position_dodge(width = dodge_w)
 
-# Create visualization
-ggplot(major_parties_survey, aes(x = age, y = vote_share, fill = gender)) +
+# Create invisible points to set y-axis limits for each party
+y_limits_data <- tibble(
+  age = factor("18_TO_24", levels = levels(major_parties_survey$age)),
+  vote_share = c(0, 50, 0, 50, 0, 30),  # Reform: 0-30, Labour & Conservative: 0-50
+  gender = rep("female", 6),
+  party_label = rep(c("Conservative", "Labour", "Reform"), each = 2)
+)
+
+# Create separate charts for each party
+# Conservative
+conservative_data <- major_parties_survey %>% filter(party_label == "Conservative")
+conservative_limits <- y_limits_data %>% filter(party_label == "Conservative")
+
+ggplot(conservative_data, aes(x = age, y = vote_share, fill = gender)) +
+  geom_blank(data = conservative_limits, aes(x = age, y = vote_share)) +
   geom_col(position = pd, width = 0.7) +
   geom_errorbar(aes(ymin = vote_share - 1.96*se, ymax = vote_share + 1.96*se),
                 position = pd, width = 0.3, color = "grey30", linewidth = 0.3) +
-  facet_wrap(~party_label, scales = "free_y", nrow = 2) +
-  scale_fill_manual(values = gender_colors, name = "Gender") +
+  scale_fill_manual(values = c("female" = "#8B5A96", "male" = "#2A9D8F"), name = "Gender") +
   scale_x_discrete(labels = c("18–24", "25–34", "35–44", "45–54", "55–64", "65–74", "75+")) +
   scale_y_continuous(labels = scales::label_percent(scale = 1, accuracy = 1)) +
-  labs(
-    x = NULL, 
-    y = "Vote Share (%)",
-    title = "2024 Vote Share by Gender and Age Group"
-  ) +
-  theme_minimal(base_size = 12, base_family = "sans") +
+  labs(x = NULL, y = "Vote Share (%)", title = "Conservative") +
+  theme_minimal_blue() +
   theme(
     legend.position = "bottom",
     panel.grid.major.x = element_blank(),
     panel.grid.minor = element_blank(),
-    strip.text = element_text(face = "bold", size = 11),
     axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
     axis.text.y = element_text(size = 10),
-    plot.title = element_text(face = "bold", size = 14)
+    plot.title = element_text(face = "bold", size = 14),
+    legend.text = element_text(size = 16),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA)
   )
 
+```
+
+```{r}
+# Labour
+labour_data <- major_parties_survey %>% filter(party_label == "Labour")
+labour_limits <- y_limits_data %>% filter(party_label == "Labour")
+
+ggplot(labour_data, aes(x = age, y = vote_share, fill = gender)) +
+  geom_blank(data = labour_limits, aes(x = age, y = vote_share)) +
+  geom_col(position = pd, width = 0.7) +
+  geom_errorbar(aes(ymin = vote_share - 1.96*se, ymax = vote_share + 1.96*se),
+                position = pd, width = 0.3, color = "grey30", linewidth = 0.3) +
+  scale_fill_manual(values = c("female" = "#8B5A96", "male" = "#2A9D8F"), name = "Gender") +
+  scale_x_discrete(labels = c("18–24", "25–34", "35–44", "45–54", "55–64", "65–74", "75+")) +
+  scale_y_continuous(labels = scales::label_percent(scale = 1, accuracy = 1)) +
+  labs(x = NULL, y = "Vote Share (%)", title = "Labour Party Vote 2024: Gender and Age") +
+  theme_minimal_blue() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 16),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(face = "bold", size = 14),
+    legend.text = element_text(size = 16),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA)
+  )
+```
+
+```{r}
+# Reform
+reform_data <- major_parties_survey %>% filter(party_label == "Reform")
+reform_limits <- y_limits_data %>% filter(party_label == "Reform")
+
+ggplot(reform_data, aes(x = age, y = vote_share, fill = gender)) +
+  geom_blank(data = reform_limits, aes(x = age, y = vote_share)) +
+  geom_col(position = pd, width = 0.7) +
+  geom_errorbar(aes(ymin = vote_share - 1.96*se, ymax = vote_share + 1.96*se),
+                position = pd, width = 0.3, color = "grey30", linewidth = 0.3) +
+  scale_fill_manual(values = c("female" = "#8B5A96", "male" = "#2A9D8F"), name = "Gender") +
+  scale_x_discrete(labels = c("18–24", "25–34", "35–44", "45–54", "55–64", "65–74", "75+")) +
+  scale_y_continuous(labels = scales::label_percent(scale = 1, accuracy = 1)) +
+  labs(x = NULL, y = "Vote Share (%)", title = "Reform Party Vote 2024: Gender and Age", size = 25) +
+  theme_minimal_blue() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 16),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(face = "bold", size = 14),
+    legend.text = element_text(size = 20),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA)
+  )
 
 ```
 
@@ -352,7 +437,7 @@ ggplot(gap_plot_data, aes(x = age, y = gap_value, fill = gap_type)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey50", linewidth = 0.5) +
   facet_wrap(~gap_label, scales = "free_y") +
   scale_fill_manual(
-    values = c("social_gap" = "#E76F51", "economic_gap" = "#2A9D8F"),
+    values = c("social_gap" = "#8B5A96", "economic_gap" = "#2A9D8F"),
     guide = "none"
   ) +
   scale_x_discrete(labels = c("18–24", "25–34", "35–44", "45–54", "55–64", "65–74", "75+")) +
@@ -363,17 +448,19 @@ ggplot(gap_plot_data, aes(x = age, y = gap_value, fill = gap_type)) +
     x = "Age Group",
     y = "Gender Gap (Male - Female)"
   ) +
-  theme_minimal(base_size = 12, base_family = "sans") +
+  theme_minimal_blue() +
   theme(
     panel.grid.major.x = element_blank(),
     panel.grid.minor = element_blank(),
-    strip.text = element_text(face = "bold", size = 11),
-    axis.text.x = element_text(size = 10),
-    axis.text.y = element_text(size = 10),
+    strip.text = element_text(face = "bold", size = 18),
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),
+    axis.text.y = element_text(family = "sans", face = "plain", size = 12),
     plot.title = element_text(face = "bold", size = 14),
-    plot.subtitle = element_text(size = 11, color = "grey40")
+    plot.subtitle = element_text(size = 11, color = "grey40"),
+    axis.title.x = element_text(family = "sans", face = "bold"),
+    axis.title.y = element_text(family = "sans", face = "bold")
   ) +
-   ylim(-0.1, 0.1)
+   ylim(-0.05, 0.05)
 
 
 
@@ -477,7 +564,7 @@ issue_data <- individual_gaps_overall %>%
   mutate(
     issue_label = case_when(
       question == "soc_censor" ~ "Censorship for\nMoral Standards",
-      question == "soc_respect" ~ "Young People Need\nMore Respect",
+      question == "soc_respect" ~ "Young People Need\n Respect for Trad. Values",
       question == "econ_onelaw" ~ "One Law for Rich,\nAnother for Poor"
     )
   )
@@ -542,7 +629,7 @@ ggplot(combined_plot_data, aes(x = issue_label)) +
   ) +
   facet_wrap(~chart_type, scales = "free_y", nrow = 1) +
   scale_fill_manual(
-    values = c("Female" = "#E76F51", "Male" = "#2A9D8F"),
+    values = c("Female" = "#8B5A96", "Male" = "#2A9D8F"),
     name = "Gender"
   ) +
   scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
@@ -552,16 +639,21 @@ ggplot(combined_plot_data, aes(x = issue_label)) +
     x = "Issue Area",
     y = "Score"
   ) +
-  theme_minimal(base_size = 12, base_family = "sans") +
+  theme_minimal_blue() +
   theme(
     panel.grid.major.x = element_blank(),
     panel.grid.minor = element_blank(),
-    strip.text = element_text(face = "bold", size = 11),
-    axis.text.x = element_text(size = 9, hjust = 1),
-    axis.text.y = element_text(size = 10),
+    strip.text = element_text(face = "bold", size = 12),
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),
+    axis.text.y = element_text(family = "sans", face = "plain", size = 12),
     plot.title = element_text(face = "bold", size = 14),
     plot.subtitle = element_text(size = 11, color = "grey40"),
-    legend.position = "bottom"
+    legend.position = "bottom",
+    legend.text = element_text(size = 10),
+    axis.title.x = element_text(family = "sans", face = "bold"),
+    axis.title.y = element_text(family = "sans", face = "bold"),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA)
   )
 
 
@@ -719,7 +811,7 @@ create_issue_plot <- function(issue_var, issue_title) {
     ) +
     facet_wrap(~chart_type, scales = "free_y", nrow = 1) +
     scale_fill_manual(
-      values = c("Female" = "#E76F51", "Male" = "#2A9D8F"),
+      values = c("Female" = "#8B5A96", "Male" = "#2A9D8F"),
       name = "Gender"
     ) +
     scale_x_discrete(labels = c("18–24", "25–34", "35–44", "45–54", "55–64", "65–74", "75+")) +
@@ -729,15 +821,20 @@ create_issue_plot <- function(issue_var, issue_title) {
       x = "Age Group",
       y = "Score"
     ) +
-    theme_minimal(base_size = 12, base_family = "sans") +
+    theme_minimal_blue() +
     theme(
       panel.grid.major.x = element_blank(),
       panel.grid.minor = element_blank(),
-      strip.text = element_text(face = "bold", size = 11),
-      axis.text.x = element_text(size = 9, angle = 45, hjust = 1),
-      axis.text.y = element_text(size = 10),
-      plot.title = element_text(face = "bold", size = 14),
-      legend.position = "bottom"
+      strip.text = element_text(face = "bold", size = 12),
+      axis.text.x = element_text(size = 12, angle = 45, hjust = 1),
+      axis.text.y = element_text(family = "sans", face = "plain", size = 12),
+      plot.title = element_text(face = "bold", size = 16),
+      legend.position = "bottom",
+      legend.text = element_text(size = 16),
+      axis.title.x = element_text(family = "sans", face = "bold"),
+      axis.title.y = element_text(family = "sans", face = "bold"),
+      plot.background = element_rect(fill = "transparent", color = NA),
+      panel.background = element_rect(fill = "transparent", color = NA)
     )
 }
 
@@ -759,320 +856,6 @@ create_issue_plot("soc_schools", "Schools Should Teach Children to Obey Authorit
 
 
 
-
-### Slide 4: Breakdown of the 18-30 Age Group - Cluseters/ Segments
-
--   Demonstrate clear evidence that young men and women have fundamentally different worldviews
--   Support argument that young people are NOT homogenous
-
-```{r}
-# Model social conservatism with full demographic controls
-model_social <- svyglm(
-  social_conservatism ~ gender * age + gender * education + age * education + 
-                       gender * region + ethnicity + household + socgrad + 
-                       marital + religion,
-  design = survey_design_full,
-  family = gaussian()
-)
-
-# Display model summary
-#summary(model_social)
-
-# Model economic leftism with same demographic controls
-model_economic <- svyglm(
-  economic_rightism ~ gender * age + gender * education + age * education + 
-                       gender * region + ethnicity + household + socgrad + 
-                       marital + religion,
-  design = survey_design_full,
-  family = gaussian()
-)
-
-# Display model summary
-summary(model_economic)
-
-# Create predicted values data frame
-
-# Function to generate predictions for demographic segments
-predict_ideological_segments <- function(
-  models = list(social = model_social, economic = model_economic),
-  demographics = list(),
-  baseline_profile = "modal",
-  output_format = "long"
-) {
-  
-  # Define modal (most common) values for baseline
-  modal_values <- list(
-    gender = "female",
-    age = "35_TO_44", 
-    education = "low",
-    ethnicity = "white",
-    region = "East of England",
-    household = "owns_with_mortgage_or_shared",
-    socgrad = "C1",
-    marital = "married_civil",
-    religion = "none"
-  )
-  
-  # Set baseline profile
-  if (baseline_profile == "modal") {
-    baseline <- modal_values
-  } else {
-    baseline <- c(modal_values, baseline_profile)
-  }
-  
-  # Create all combinations of specified demographics
-  if (length(demographics) == 0) {
-    stop("Must specify at least one demographic variable to vary")
-  }
-  
-  # Generate grid of demographic combinations
-  demo_grid <- expand_grid(!!!demographics)
-  
-  # Create prediction dataframe by combining baseline with each demo combination
-  pred_data <- demo_grid %>%
-    rowwise() %>%
-    do({
-      # Start with baseline
-      row_data <- baseline
-      # Override with specific demographic values for this row
-      for (var in names(demographics)) {
-        row_data[[var]] <- .[[var]]
-      }
-      # Convert to dataframe row
-      as_tibble(row_data)
-    }) %>%
-    ungroup()
-  
-  # Generate predictions for both models
-  social_pred <- predict(models$social, newdata = pred_data, se.fit = TRUE)
-  economic_pred <- predict(models$economic, newdata = pred_data, se.fit = TRUE)
-  
-  # Extract predictions and standard errors properly
-  if (is.list(social_pred)) {
-    social_fit <- social_pred$fit
-    social_se <- social_pred$se.fit
-  } else {
-    social_fit <- as.numeric(social_pred)
-    social_se <- rep(NA, length(social_fit))
-  }
-  
-  if (is.list(economic_pred)) {
-    economic_fit <- economic_pred$fit
-    economic_se <- economic_pred$se.fit
-  } else {
-    economic_fit <- as.numeric(economic_pred)
-    economic_se <- rep(NA, length(economic_fit))
-  }
-  
-  # Combine predictions with demographic data
-  results <- pred_data %>%
-    select(all_of(names(demographics))) %>%
-    mutate(
-      social_conservatism_pred = social_fit,
-      social_conservatism_se = social_se,
-      social_conservatism_lower = social_conservatism_pred - 1.96 * social_conservatism_se,
-      social_conservatism_upper = social_conservatism_pred + 1.96 * social_conservatism_se,
-      economic_rightism_pred = economic_fit,
-      economic_rightism_se = economic_se,
-      economic_rightism_lower = economic_rightism_pred - 1.96 * economic_rightism_se,
-      economic_rightism_upper = economic_rightism_pred + 1.96 * economic_rightism_se,
-      segment_id = row_number()
-    )
-  
-  # Convert to long format if requested
-  if (output_format == "long") {
-    results <- results %>%
-      pivot_longer(
-        cols = c(social_conservatism_pred, economic_rightism_pred),
-        names_to = "ideology_measure",
-        values_to = "predicted_value",
-        names_pattern = "(.*)_pred"
-      ) %>%
-      mutate(
-        se = case_when(
-          ideology_measure == "social_conservatism" ~ social_conservatism_se,
-          ideology_measure == "economic_rightism" ~ economic_rightism_se
-        ),
-        ci_lower = case_when(
-          ideology_measure == "social_conservatism" ~ social_conservatism_lower,
-          ideology_measure == "economic_rightism" ~ economic_rightism_lower
-        ),
-        ci_upper = case_when(
-          ideology_measure == "social_conservatism" ~ social_conservatism_upper,
-          ideology_measure == "economic_rightism" ~ economic_rightism_upper
-        )
-      ) %>%
-      select(-ends_with("_se"), -ends_with("_lower"), -ends_with("_upper"))
-  }
-  
-  return(results)
-}
-
-# Test the function with gender comparison
-gender_predictions <- predict_ideological_segments(
-  demographics = list(gender = c("male", "female"))
-)
-
-print("Gender comparison predictions:")
-print(gender_predictions)
-
-# Test with age groups
-age_predictions <- predict_ideological_segments(
-  demographics = list(age = c("18_TO_24", "35_TO_44", "65_TO_74"))
-)
-
-print("Age group predictions:")
-print(age_predictions)
-
-# Test with gender x education interaction
-gender_education_predictions <- predict_ideological_segments(
-  demographics = list(gender = c("male", "female"), education = c("low", "high"))
-)
-
-print("Gender x Education predictions:")
-print(gender_education_predictions)
-
-# Function to create horizontal bar charts from predictions dataframe
-plot_segment_predictions <- function(
-  predictions_df, 
-  title = "Predicted Ideological Scores by Segment",
-  facet_by_measure = TRUE,
-  color_var = NULL,
-  format = "wide"
-) {
-  
-  # Handle different input formats
-  if (format == "wide") {
-    # Convert wide to long format for plotting
-    plot_data <- predictions_df %>%
-      pivot_longer(
-        cols = c(social_conservatism_pred, economic_rightism_pred),
-        names_to = "ideology_measure",
-        values_to = "predicted_value",
-        names_pattern = "(.*)_pred"
-      ) %>%
-      mutate(
-        ideology_label = case_when(
-          ideology_measure == "social_conservatism" ~ "Social Conservatism",
-          ideology_measure == "economic_rightism" ~ "Economic Rightism"
-        )
-      )
-  } else {
-    # Already in long format
-    plot_data <- predictions_df %>%
-      mutate(
-        ideology_label = case_when(
-          ideology_measure == "social_conservatism" ~ "Social Conservatism",
-          ideology_measure == "economic_rightism" ~ "Economic Rightism"
-        )
-      )
-  }
-  
-  # Detect demographic variables (exclude prediction columns)
-  demo_vars <- setdiff(names(predictions_df), 
-                      c("social_conservatism_pred", "economic_rightism_pred", 
-                        "social_conservatism_se", "economic_rightism_se",
-                        "social_conservatism_lower", "social_conservatism_upper",
-                        "economic_rightism_lower", "economic_rightism_upper",
-                        "segment_id", "ideology_measure", "predicted_value",
-                        "se", "ci_lower", "ci_upper", "ideology_label"))
-  
-  # Create segment labels by combining all demographic variables
-  if (length(demo_vars) == 1) {
-    plot_data <- plot_data %>%
-      mutate(segment_label = .data[[demo_vars[1]]])
-  } else if (length(demo_vars) == 2) {
-    plot_data <- plot_data %>%
-      mutate(segment_label = paste(.data[[demo_vars[1]]], .data[[demo_vars[2]]], sep = " × "))
-  } else {
-    plot_data <- plot_data %>%
-      rowwise() %>%
-      mutate(segment_label = paste(c_across(all_of(demo_vars)), collapse = " × ")) %>%
-      ungroup()
-  }
-  
-  # Determine color variable
-  if (is.null(color_var) && length(demo_vars) >= 1) {
-    color_var <- demo_vars[1]  # Use first demographic variable for coloring
-  }
-  
-  # Create base plot
-  p <- ggplot(plot_data, aes(x = predicted_value, y = reorder(segment_label, predicted_value)))
-  
-  # Add color aesthetic if specified
-  if (!is.null(color_var) && color_var %in% names(plot_data)) {
-    p <- p + geom_col(aes(fill = .data[[color_var]]), alpha = 0.8)
-    
-    # Use consistent colors if gender is involved
-    if (color_var == "gender") {
-      p <- p + scale_fill_manual(
-        values = c("male" = "#2A9D8F", "female" = "#E76F51"),
-        name = "Gender"
-      )
-    }
-  } else {
-    p <- p + geom_col(fill = "#2A9D8F", alpha = 0.8)
-  }
-  
-  # Add labels and theme
-  p <- p +
-    labs(
-      title = title,
-      x = "Predicted Score",
-      y = "Demographic Segment"
-    ) +
-    theme_minimal() +
-    theme(
-      plot.title = element_text(size = 14, face = "bold"),
-      axis.title = element_text(size = 12),
-      axis.text = element_text(size = 10),
-      legend.position = "bottom"
-    )
-  
-  # Add faceting if requested
-  if (facet_by_measure && "ideology_label" %in% names(plot_data)) {
-    p <- p + facet_wrap(~ ideology_label, scales = "free_x")
-  }
-  
-  # Add reference line at zero
-  p <- p + geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.5)
-  
-  return(p)
-}
-
-# Simple gender comparison
-gender_plot <- plot_segment_predictions(
-  gender_predictions, 
-  title = "Gender Differences in Political Attitudes",
-  format = "long",
-  color_var = "gender"
-)
-
-print(gender_plot)
-
-# Age group comparison  
-age_plot <- plot_segment_predictions(
-  age_predictions,
-  title = "Political Attitudes Across Age Groups", 
-  format = "long",
-  color_var = "age"
-)
-
-print(age_plot)
-
-# Gender x Education interaction
-interaction_plot <- plot_segment_predictions(
-  gender_education_predictions,
-  title = "Gender × Education Effects on Political Attitudes",
-  format = "long", 
-  color_var = "gender"
-)
-
-print(interaction_plot)
-
-
-
-```
 
 
 ### Slide 5: What Drives the Divide? (Deeper Segmentation)
@@ -1118,9 +901,11 @@ london_vs_rest <- gender_gap_by_region_age %>%
   mutate(
     gap_type = case_when(
       gap_type == "social_gap" ~ "Social Conservatism Gap",
-      gap_type == "economic_gap" ~ "Economic Rightism Gap"
+      gap_type == "economic_gap" ~ "Economically Right Gap"
     )
   )
+
+print(london_vs_rest)
 
 # Create line plot to show trends more clearly
 ggplot(london_vs_rest, aes(x = age, y = gap_value, color = location, group = location)) +
@@ -1129,12 +914,12 @@ ggplot(london_vs_rest, aes(x = age, y = gap_value, color = location, group = loc
   geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
   facet_wrap(~gap_type, scales = "free_y") +
   labs(
-    title = "Gender Ideological Gaps: London vs Rest of UK",
-    subtitle = "How gender divides vary by age and location",
+    title = "GEnderIdeology Gaps: London vs Rest of UK",
+    #subtitle = "How gender divides vary by age and location",
     x = "Age Group", 
     y = "Gender Gap (Male - Female)",
     color = "Location",
-    caption = "Positive = men more conservative/economically right-wing than women"
+    #caption = "Positive = men more conservative/economically right-wing than women"
   ) +
   theme_minimal() +
   theme(
@@ -1142,7 +927,8 @@ ggplot(london_vs_rest, aes(x = age, y = gap_value, color = location, group = loc
     plot.title = element_text(size = 14, face = "bold"),
     strip.text = element_text(size = 12, face = "bold")
   ) +
-  scale_color_manual(values = c("London" = "#E74C3C", "Rest of UK" = "#3498DB"))
+  scale_color_manual(values = c("London" = "#E74C3C", "Rest of UK" = "#3498DB")) +
+  ylim(-0.075, 0.075)
 
 
 # Add a version that shows the mean scores as well, next to the gaps 
@@ -1188,7 +974,7 @@ education_comparison <- gender_gap_by_education_age %>%
   mutate(
     gap_type = case_when(
       gap_type == "social_gap" ~ "Social Conservatism Gap",
-      gap_type == "economic_gap" ~ "Economic Leftism Gap"
+      gap_type == "economic_gap" ~ "Economically Right Gap"
     )
   )
 
@@ -1199,12 +985,13 @@ ggplot(education_comparison, aes(x = age, y = gap_value, color = education, grou
   geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
   facet_wrap(~gap_type, scales = "free_y") +
   labs(
-    title = "Gender Ideological Gaps by Education Level",
-    subtitle = "How gender divides vary by age and education",
+    title = "Gender Ideology Gaps: Education Level",
+    #subtitle = "How gender divides vary by age and education",
     x = "Age Group", 
     y = "Gender Gap (Male - Female)",
     color = "Education",
-    caption = "Positive = men more conservative/economically left than women"
+    #caption = "Positive = men more conservative/economically left than women",
+    size = 15
   ) +
   theme_minimal() +
   theme(
@@ -1212,7 +999,8 @@ ggplot(education_comparison, aes(x = age, y = gap_value, color = education, grou
     plot.title = element_text(size = 14, face = "bold"),
     strip.text = element_text(size = 12, face = "bold")
   ) +
-  scale_color_brewer(type = "qual", palette = "Set1")
+  scale_color_brewer(type = "qual", palette = "Set1") +
+  ylim(-0.06, 0.06)
 
 ```
 

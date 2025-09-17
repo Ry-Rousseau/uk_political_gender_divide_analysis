@@ -1668,6 +1668,8 @@ Additionally, I am considering a more in-depth clustering based analysis of the 
 
 - Increased usage of the age_numeric variables, more granular analysis of age effects
 
+- Analysis of non-voters, how large is the politically apathetic group with gender/age?
+
 
 #### 8) Function generation for future use
 
